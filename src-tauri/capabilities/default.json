@@ -12,6 +12,9 @@
     "fs:allow-write-file",
     "fs:allow-exists",
     "fs:allow-rename",
-    "fs:scope-home-recursive"
+    {
+      "identifier": "fs:scope",
+      "allow": ["**"]
+    }
   ]
 }
