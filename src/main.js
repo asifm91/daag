@@ -1,6 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile, writeFile, rename, exists } from "@tauri-apps/plugin-fs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 // ---- State -----------------------------------------------------------
 let currentPath = null; // absolute path of the PDF currently open
@@ -721,16 +722,56 @@ async function pickAndOpenPdf() {
   await openPath(path);
 }
 
+// ---- Drag-and-drop to open a PDF -----------------------------------------
+// pdf.js's own DOM-level drop handling is unsafe here (see
+// blockInternalFileOpen above, which still blocks it defensively) — and
+// separately, doesn't actually fire for a real OS file drop in the first
+// place: Tauri's native window-level drag-drop (dragDropEnabled defaults
+// to true, unset in tauri.conf.json so that default applies) intercepts
+// the drag before the WebView's own HTML5 "drop" event ever sees it.
+// Tauri's own event carries the real absolute filesystem path though,
+// unlike the browser File API pdf.js's handler is stuck with — exactly
+// what was missing to make drag-and-drop safe — so this routes through
+// openPath(), same as every other safe entry point, never through pdf.js.
+//
+// dropInFlight guards against an open upstream issue where
+// onDragDropEvent can fire twice for a single user drop
+// (tauri-apps/tauri#14134, unconfirmed/unfixed as of this writing) — a
+// plain synchronous flag is enough since both events go through this one
+// listener and JS runs event handlers one at a time, so the flag is
+// already set before a near-simultaneous second event's handler runs.
+let dropInFlight = false;
+async function attachDragDropOpen() {
+  const webview = getCurrentWebview();
+  await webview.onDragDropEvent((event) => {
+    if (event.payload.type !== "drop" || dropInFlight) return;
+    const path = event.payload.paths.find((p) => p.toLowerCase().endsWith(".pdf"));
+    if (!path) {
+      reportError("Dropped file is not a PDF");
+      return;
+    }
+    dropInFlight = true;
+    openPath(path)
+      .catch((err) => {
+        console.error(err);
+        reportError("Failed to open file — see console");
+      })
+      .finally(() => {
+        dropInFlight = false;
+      });
+  });
+}
+
 // ---- App-wide viewer setup (runs once, independent of any open file) ---
 // attachCommentSaveHook/attachUndoRedoHook listen on the persistent
 // app.eventBus, injectSaveButton/injectOpenButton just create toolbar
-// buttons, and blockInternalFileOpen/attachKeyboardShortcuts must be
-// active *before* the user ever opens a file through us — closing off
-// pdf.js's own "Open File" paths and taking over Ctrl+O/Ctrl+S are both
-// reachable from the very first landing screen (Tools-menu entry,
-// drag-and-drop, the keys themselves) with no dependency on a file ever
-// having been opened through us. None of this belongs gated behind our
-// own Open button.
+// buttons, and blockInternalFileOpen/attachKeyboardShortcuts/
+// attachDragDropOpen must be active *before* the user ever opens a file
+// through us — closing off pdf.js's own "Open File" paths, taking over
+// Ctrl+O/Ctrl+S, and accepting a dropped file are all reachable from the
+// very first landing screen (Tools-menu entry, drag-and-drop, the keys
+// themselves) with no dependency on a file ever having been opened
+// through us. None of this belongs gated behind our own Open button.
 //
 // Deliberately does NOT auto-reopen the most recent file — the landing
 // screen (Open button + recent-files list) is always what greets you on
@@ -744,6 +785,7 @@ async function initializeViewer() {
   injectStatusButton();
   blockInternalFileOpen(frame.contentDocument);
   attachKeyboardShortcuts(frame.contentDocument);
+  attachDragDropOpen();
   addShortcutHints(frame.contentDocument);
 
   renderRecentFiles();

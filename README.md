@@ -58,11 +58,12 @@ are things that were actually hit and fixed.
 - **pdf.js's own Save/Download toolbar button doesn't work here** — it's
   actually Save-As via a browser download flow Tauri's WebView2 doesn't
   wire up, so it's hidden and replaced with a working one.
-- **Don't use pdf.js's own "Open File" (Tools menu or drag-and-drop)** —
-  these are blocked outright, because they bypass this app's file-path
-  tracking in a way that would silently corrupt the *previous* file on
-  next autosave. Use the Open button (landing screen or toolbar) or
-  Ctrl+O, which is intercepted and redirected to the same safe picker.
+- **Don't use pdf.js's own "Open File" (Tools menu)** — it's blocked
+  outright, because it bypasses this app's file-path tracking in a way
+  that would silently corrupt the *previous* file on next autosave. Use
+  the Open button (landing screen or toolbar), Ctrl+O, or drag-and-drop —
+  all three are intercepted and redirected to the same safe picker path,
+  never through pdf.js's own handling.
 - **`saveDocument()` on documents with no annotations** — if a PDF has no
   AcroForm/annotation structures pdf.js can serialize, this may return
   the original bytes unchanged. Expected, not a bug.

@@ -173,10 +173,30 @@ tab or an embedder that replicates browser behavior:
   while the actually-opened file's real path is never touched at all.
   There's no fix that tracks the new path instead: the File API never
   exposes a real absolute filesystem path, only a filename. All three are
-  now blocked (`blockInternalFileOpen` — button hidden via CSS,
+  blocked from ever reaching pdf.js's own handling
+  (`blockInternalFileOpen` — Tools-menu button hidden via CSS,
   drag-and-drop and Ctrl+O intercepted via a capture-phase listener on
   the iframe's document, which fires before pdf.js's own bubble-phase
-  listeners see the event regardless of registration order).
+  listeners see the event regardless of registration order). Ctrl+O is
+  then redirected to `pickAndOpenPdf()` (the same safe picker as the
+  toolbar Open button) rather than just erroring, and drag-and-drop is
+  made to actually work too — see the next bullet.
+- **Real drag-and-drop needs Tauri's native event, not the DOM one.**
+  Once dropping a PDF was blocked at the DOM level above, it did nothing
+  at all — which turned out to be because it was never reaching the DOM
+  in the first place: with `dragDropEnabled` at its Tauri default of
+  `true` (unset in `tauri.conf.json`), the native window layer intercepts
+  an OS file drop before the WebView's own HTML5 `drop` event ever fires,
+  so `blockInternalFileOpen`'s DOM listener was dead code for this path
+  all along (still there as defense-in-depth; genuinely live for Ctrl+O).
+  The actual fix (`attachDragDropOpen`) listens for Tauri's own
+  `getCurrentWebview().onDragDropEvent()` instead — which, unlike the
+  browser File API, *does* carry the real absolute filesystem path
+  (`event.payload.paths`), the one thing missing to make drag-and-drop
+  safe at all — and routes it through `openPath()`, same as every other
+  entry point. Guards against a still-open upstream bug where this event
+  can fire twice for one drop (tauri-apps/tauri#14134) with a plain
+  synchronous in-flight flag.
 - **pdf.js's own `setTitle()`/`document.title` is a no-op when embedded.**
   `isViewerEmbedded: window.parent !== window` is always true for an
   iframe, and `setTitle()` early-returns without touching `document.title`
