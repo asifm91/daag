@@ -51,6 +51,17 @@
       #logList li:last-child { border-bottom: none; }
       #logList li.error { color: #ffb3b3; }
       #logList .log-time { color: #888; margin-right: 8px; }
+
+      /* ---- Settings: global commenter name, opened from the toolbar ---- */
+      #settingsDialog { background: #262626; color: #eee; border: 1px solid #444; border-radius: 8px; padding: 0; width: min(360px, 90vw); }
+      #settingsDialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+      #settingsDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #3a3a3a; }
+      #settingsDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
+      #settingsDialogBody { padding: 16px; }
+      #settingsDialogBody label { display: block; font-size: 12px; color: #aaa; margin-bottom: 6px; }
+      #commenterNameInput { width: 100%; box-sizing: border-box; background: #1c1c1c; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 7px 9px; font-size: 13px; }
+      #settingsDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid #3a3a3a; }
+      #settingsDialogFooter button { padding: 6px 14px; font-size: 13px; }
     </style>
   </head>
   <body>
@@ -101,6 +112,21 @@
         <button id="logDialogCloseButton" type="button">Close</button>
       </div>
       <ul id="logList"></ul>
+    </dialog>
+
+    <dialog id="settingsDialog">
+      <div id="settingsDialogHeader">
+        <h2>Settings</h2>
+        <button id="settingsDialogCloseButton" type="button">Close</button>
+      </div>
+      <div id="settingsDialogBody">
+        <label for="commenterNameInput">Commenter name</label>
+        <input id="commenterNameInput" type="text" autocomplete="off" placeholder="Your name" />
+      </div>
+      <div id="settingsDialogFooter">
+        <button id="settingsDialogCancelButton" type="button">Cancel</button>
+        <button id="settingsDialogSaveButton" type="button">Save</button>
+      </div>
     </dialog>
 
     <script type="module" src="./main.js"></script>

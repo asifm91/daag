@@ -2,6 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { readFile, writeFile, rename, exists } from "@tauri-apps/plugin-fs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { invoke } from "@tauri-apps/api/core";
 
 // ---- State -----------------------------------------------------------
 let currentPath = null; // absolute path of the PDF currently open
@@ -14,6 +15,7 @@ const AUTOSAVE_MAX_WAIT_MS = 20000; // ...but never wait longer than this
 const RECENT_FILES_KEY = "pdfAnnotator.recentFiles";
 const MAX_RECENT_FILES = 8;
 const MAX_LOG_ENTRIES = 200;
+const COMMENTER_NAME_KEY = "pdfAnnotator.commenterName";
 
 const landingScreen = document.getElementById("landingScreen");
 const viewerScreen = document.getElementById("viewerScreen");
@@ -25,6 +27,11 @@ const logDialogEl = document.getElementById("logDialog");
 const logDialogCloseButtonEl = document.getElementById("logDialogCloseButton");
 const logListEl = document.getElementById("logList");
 const frame = document.getElementById("viewerFrame");
+const settingsDialogEl = document.getElementById("settingsDialog");
+const settingsDialogCloseButtonEl = document.getElementById("settingsDialogCloseButton");
+const settingsDialogCancelButtonEl = document.getElementById("settingsDialogCancelButton");
+const settingsDialogSaveButtonEl = document.getElementById("settingsDialogSaveButton");
+const commenterNameInputEl = document.getElementById("commenterNameInput");
 
 // ---- Status reporting ----------------------------------------------------
 // Every status update — dirty/saving/saved/error, however minor — always
@@ -90,6 +97,52 @@ logDialogCloseButtonEl.addEventListener("click", () => logDialogEl.close());
 // child elements would otherwise bubble past).
 logDialogEl.addEventListener("click", (event) => {
   if (event.target === logDialogEl) logDialogEl.close();
+});
+
+// ---- Global "commenter name" setting -------------------------------------
+// Stamped onto every annotation on save (see attachAnnotationHooks below)
+// so PDFs opened elsewhere (Acrobat, etc.) show who made each comment,
+// via the standard PDF "T"/author field. Stored in localStorage, same as
+// the recent-files list — this is a global app setting, not per-document.
+// Defaults to the OS account name (via the get_os_username Tauri command;
+// the webview has no way to read that itself) the first time the app runs
+// with nothing saved yet, but is always user-editable afterwards from the
+// toolbar's Settings button.
+function getCommenterName() {
+  return localStorage.getItem(COMMENTER_NAME_KEY) || "";
+}
+
+function setCommenterName(name) {
+  localStorage.setItem(COMMENTER_NAME_KEY, name);
+}
+
+async function seedDefaultCommenterName() {
+  if (localStorage.getItem(COMMENTER_NAME_KEY) !== null) return; // already set (even if blank)
+  try {
+    const osName = await invoke("get_os_username");
+    if (osName) setCommenterName(osName);
+  } catch (err) {
+    console.error("Failed to read OS username:", err);
+  }
+}
+
+function openSettingsDialog() {
+  commenterNameInputEl.value = getCommenterName();
+  settingsDialogEl.showModal();
+  commenterNameInputEl.focus();
+}
+
+settingsDialogSaveButtonEl.addEventListener("click", () => {
+  setCommenterName(commenterNameInputEl.value.trim());
+  settingsDialogEl.close();
+});
+settingsDialogCancelButtonEl.addEventListener("click", () => settingsDialogEl.close());
+settingsDialogCloseButtonEl.addEventListener("click", () => settingsDialogEl.close());
+settingsDialogEl.addEventListener("click", (event) => {
+  if (event.target === settingsDialogEl) settingsDialogEl.close();
+});
+commenterNameInputEl.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") settingsDialogSaveButtonEl.click();
 });
 
 function showViewer() {
@@ -320,6 +373,37 @@ function injectStatusButton() {
 function updateStatusIndicator(kind) {
   if (!toolbarStatusButton) return;
   toolbarStatusButton.className = `toolbarButton status-${kind || "saved"}`;
+}
+
+// ---- Adding a Settings button to pdf.js's toolbar ------------------------
+// Opens #settingsDialog (in the parent document, not the iframe — same as
+// the status button opening #logDialog above) to edit the global commenter
+// name. Injected the same way and for the same reasons as the other
+// toolbar buttons.
+let toolbarSettingsButton = null;
+function injectSettingsButton() {
+  if (toolbarSettingsButton) return;
+  const doc = frame.contentDocument;
+  const downloadButton = doc.getElementById("downloadButton");
+  const group = downloadButton && downloadButton.closest(".toolbarHorizontalGroup");
+  if (!group) return;
+
+  ensureCustomStylesheetLoaded(doc);
+
+  const button = doc.createElement("button");
+  button.id = "customSettingsButton";
+  button.className = "toolbarButton";
+  button.type = "button";
+  button.title = "Settings — commenter name";
+  button.addEventListener("click", openSettingsDialog);
+
+  const label = doc.createElement("span");
+  label.textContent = "Settings";
+  button.appendChild(label);
+
+  group.appendChild(button); // after Open, Save, Activity Log
+
+  toolbarSettingsButton = button;
 }
 
 // ---- Blocking pdf.js's own internal "Open File" paths -------------------
@@ -801,11 +885,13 @@ async function initializeViewer() {
   injectSaveButton();
   injectOpenButton();
   injectStatusButton();
+  injectSettingsButton();
   blockInternalFileOpen(frame.contentDocument);
   attachKeyboardShortcuts(frame.contentDocument);
   attachDragDropOpen();
   disableInternalBeforeUnloadPrompt(app);
   addShortcutHints(frame.contentDocument);
+  seedDefaultCommenterName();
 
   renderRecentFiles();
 }
@@ -1030,6 +1116,40 @@ async function attachAnnotationHooks(app) {
     originalRemove(key);
     if (existed) markDirty();
   };
+
+  // Stamp the global commenter name onto every serialized annotation so
+  // saveDocument() writes it into the PDF's standard "T"/author field.
+  // pdf.js's worker-side writers already know how to do this — see
+  // createNewDict() for FreeText/Ink/Highlight/Stamp in build/pdf.worker.mjs,
+  // each of which does `dict.setIfDefined("T", ...user)` — but nothing on
+  // the display side ever populates `user` on a freshly created editor's
+  // serialize() output; there's no UI for it at all in this pdf.js build.
+  // `serializable` is a getter defined on AnnotationStorage.prototype, not
+  // an own property, so it can't be reassigned like `remove` above (no
+  // setter — a plain `storage.serializable = ...` would throw in strict
+  // mode); shadow it per-instance with defineProperty instead. Only fills
+  // in `user` when the serialized object doesn't already have one, so this
+  // never overwrites an author baked into an annotation from elsewhere
+  // (e.g. re-saving a PDF someone else annotated in Acrobat).
+  const originalSerializableDescriptor = Object.getOwnPropertyDescriptor(
+    Object.getPrototypeOf(storage),
+    "serializable"
+  );
+  Object.defineProperty(storage, "serializable", {
+    configurable: true,
+    get() {
+      const serializable = originalSerializableDescriptor.get.call(storage);
+      const name = getCommenterName();
+      if (name && serializable.map) {
+        for (const value of serializable.map.values()) {
+          if (value && typeof value === "object" && value.user === undefined) {
+            value.user = name;
+          }
+        }
+      }
+      return serializable;
+    },
+  });
 }
 
 function markDirty() {
