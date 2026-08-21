@@ -161,6 +161,22 @@ ever stops working after a pdf.js upgrade, re-verify both of these
 against the new bundled source before assuming the approach itself is
 wrong.
 
+**Bit that actually bit us**: the deletion markers reach `saveDocument()`
+and the file on disk is correct immediately — confirmed by closing and
+reopening the file. But the *on-screen* pages don't update: since
+`stripAllAnnotations()` mutates `annotationStorage` directly rather than
+going through the editor UI, nothing tells the already-rendered
+annotation layers to remove those DOM elements (a real, UI-driven
+deletion carries its own DOM removal as part of that flow; a
+storage-only mutation on an already-rendered page doesn't touch the DOM
+at all). Fixed by reloading the viewer a second time from the bytes
+`saveNow()` just wrote (`saveNow` now returns the saved bytes for exactly
+this) — i.e. `revertToSessionStart()`'s strip-all branch does revert →
+strip → save → **reload from what was just saved**, so the screen always
+matches disk by the time the toast fires. The plain (non-strip) revert
+doesn't need this: its `loadPdfIntoViewer()` call *is* a full document
+reload already, so it renders correctly the first time.
+
 ### Rust side
 Intentionally thin — just wires up the `dialog`, `fs`, and (for the
 titlebar) `core:window:allow-set-title` capabilities. All real logic is

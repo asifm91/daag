@@ -1255,11 +1255,16 @@ function scheduleAutosave() {
 // fire on every debounce window, autosaving every few seconds while
 // actively editing — the toolbar status dot and activity log still see
 // every one, just without interrupting with a popup for each).
+//
+// Returns the saved bytes on success (undefined on no-op/failure) — used
+// by revertToSessionStart's strip-all-annotations path to reload the
+// viewer from exactly what was just written to disk, without a second
+// disk read.
 async function saveNow({ force = false } = {}) {
-  if (!currentPath || saveInFlight) return;
-  if (!force && !dirty) return;
+  if (!currentPath || saveInFlight) return undefined;
+  if (!force && !dirty) return undefined;
   const app = getViewerApp();
-  if (!app || !app.pdfDocument) return;
+  if (!app || !app.pdfDocument) return undefined;
 
   saveInFlight = true;
   setStatus("Saving…", "saving");
@@ -1279,10 +1284,12 @@ async function saveNow({ force = false } = {}) {
     dirty = false;
     applyWindowTitleBar();
     setStatus(`${force ? "Saved" : "Autosaved"} ${new Date().toLocaleTimeString()}`, "", { toast: force });
+    return bytes;
   } catch (err) {
     console.error("Autosave failed:", err);
     setStatus("Autosave failed — see console", "error", { toast: true });
     // Keep `dirty` true so the next edit or manual Save retries.
+    return undefined;
   } finally {
     saveInFlight = false;
   }
@@ -1313,13 +1320,27 @@ async function revertToSessionStart({ stripAllAnnotationsToo = false } = {}) {
   if (!app) return;
 
   await loadPdfIntoViewer(app, currentPath, sessionOriginalBytes.slice());
+
   if (stripAllAnnotationsToo) {
     await stripAllAnnotations(app);
+    const savedBytes = await saveNow({ force: true });
+    // stripAllAnnotations writes deletion markers straight into
+    // annotationStorage rather than going through pdf.js's editor UI (see
+    // the comment there) — a real, UI-driven deletion removes its own
+    // rendered DOM element as part of that flow, but a storage-only
+    // mutation on an already-rendered page never touches the DOM. Without
+    // this reload, the file on disk is correct immediately, but the
+    // screen keeps showing the "deleted" annotations until the file is
+    // closed and reopened (confirmed: annotations were gone on reopen,
+    // but stayed rendered in the same session beforehand).
+    if (savedBytes) {
+      await loadPdfIntoViewer(app, currentPath, savedBytes);
+    }
     setStatus("Undo All: removed every annotation in this file", "", { toast: true });
   } else {
     setStatus("Undo All: removed all annotations made this session", "", { toast: true });
+    await saveNow({ force: true });
   }
-  await saveNow({ force: true });
 }
 
 // pdf.js's own internal storage-key convention for an annotation-editor
@@ -1381,17 +1402,42 @@ async function stripAllAnnotations(app) {
   );
   const annotationsByPage = await Promise.all(pages.map((page) => page.getAnnotations()));
 
+  // Temporary diagnostics: this path leans on undocumented pdf.js
+  // internals (see the block comment above), so when something doesn't
+  // get removed, this pinpoints whether it's because getAnnotations()
+  // found nothing, the type filter excluded it, or it lacked a usable
+  // `.id` (e.g. a directly-embedded, non-indirect-reference annotation
+  // dict, which pdf.js can't target for deletion this way at all).
+  let found = 0,
+    marked = 0,
+    skippedType = 0,
+    skippedNoId = 0;
+
   annotationsByPage.forEach((annotations, pageIndex) => {
     for (const annotation of annotations) {
-      if (!annotation.id || preserveTypes.has(annotation.annotationType)) continue;
+      found++;
+      if (!annotation.id) {
+        skippedNoId++;
+        console.warn("[stripAllAnnotations] no usable id, skipping:", annotation);
+        continue;
+      }
+      if (preserveTypes.has(annotation.annotationType)) {
+        skippedType++;
+        continue;
+      }
       storage.setValue(`${PDFJS_ANNOTATION_EDITOR_PREFIX}${annotation.id}`, {
         id: annotation.id,
         deleted: true,
         pageIndex,
         popupRef: annotation.popupRef || "",
       });
+      marked++;
     }
   });
+
+  console.log(
+    `[stripAllAnnotations] pages=${pdfDocument.numPages} found=${found} marked=${marked} skippedType=${skippedType} skippedNoId=${skippedNoId}`
+  );
 }
 
 // Safety net: even mid-typing, don't let unsaved changes sit forever.
