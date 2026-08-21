@@ -618,6 +618,43 @@ function injectUndoAllButton() {
   toolbarUndoAllButton = button;
 }
 
+// ---- Adding an "Export Comments" button to pdf.js's toolbar --------------
+// Writes every commented annotation in the document to a Markdown file —
+// see exportComments() below. Disabled until a file is open, same as
+// Save/Undo All. Injected the same way and for the same reasons as the
+// other toolbar buttons.
+let toolbarExportCommentsButton = null;
+function injectExportCommentsButton() {
+  if (toolbarExportCommentsButton) return;
+  const doc = frame.contentDocument;
+  const downloadButton = doc.getElementById("downloadButton");
+  const group = downloadButton && downloadButton.closest(".toolbarHorizontalGroup");
+  if (!group) return;
+
+  ensureCustomStylesheetLoaded(doc);
+
+  const button = doc.createElement("button");
+  button.id = "customExportCommentsButton";
+  button.className = "toolbarButton";
+  button.type = "button";
+  button.title = "Export all comments to a Markdown file";
+  button.disabled = true;
+  button.addEventListener("click", () =>
+    exportComments().catch((err) => {
+      console.error(err);
+      setStatus("Export comments failed — see console", "error", { toast: true });
+    })
+  );
+
+  const label = doc.createElement("span");
+  label.textContent = "Export Comments";
+  button.appendChild(label);
+
+  group.appendChild(button); // after Open, Save, Activity Log, Settings, Undo All
+
+  toolbarExportCommentsButton = button;
+}
+
 // ---- Blocking pdf.js's own internal "Open File" paths -------------------
 // pdf.js has three ways to open a *different* PDF that completely bypass
 // openPath()/pickAndOpenPdf() below: the "Open File…" entry in its overflow Tools menu
@@ -858,6 +895,17 @@ function filenameFromPath(path) {
   return path.split(/[\\/]/).pop() || path;
 }
 
+// Neutralizes Markdown structural characters that could otherwise corrupt
+// the generated export's structure when they appear inside PDF-sourced
+// text we don't control (comment text, highlighted source text) — a line
+// starting with "# " or "> " in a comment would otherwise be read back as
+// our own heading/blockquote syntax, not literal text.
+function escapeMarkdown(text) {
+  return text
+    .replace(/[\\`*_[\]]/g, "\\$&") // inline emphasis/link syntax
+    .replace(/^(#{1,6}\s|>\s|-\s|\+\s|\d+\.\s)/gm, "\\$1"); // leading block syntax
+}
+
 function renderRecentFiles() {
   const files = getRecentFiles();
   recentFilesListEl.replaceChildren();
@@ -995,6 +1043,7 @@ async function loadPdfIntoViewer(app, path, bytes) {
   dirty = false;
   if (toolbarSaveButton) toolbarSaveButton.disabled = false;
   if (toolbarUndoAllButton) toolbarUndoAllButton.disabled = false;
+  if (toolbarExportCommentsButton) toolbarExportCommentsButton.disabled = false;
   setStatus(`Open: ${path}`);
   addToRecentFiles(path);
   renderRecentFiles();
@@ -1218,6 +1267,7 @@ async function initializeViewer() {
   injectStatusButton();
   injectSettingsButton();
   injectUndoAllButton();
+  injectExportCommentsButton();
   blockInternalFileOpen(frame.contentDocument);
   attachKeyboardShortcuts(frame.contentDocument);
   attachDragDropOpen();
@@ -1688,6 +1738,143 @@ async function stripAllAnnotations(app) {
 
   console.log(
     `[stripAllAnnotations] pages=${pdfDocument.numPages} found=${found} marked=${marked} skippedType=${skippedType} skippedNoId=${skippedNoId}`
+  );
+}
+
+// ---- Exporting comments to Markdown --------------------------------------
+// Pulls every commented annotation (Highlight/Underline/StrikeOut/Squiggly/
+// Ink/Stamp/FreeText — anything with actual comment text, see below) out of
+// the document into a standalone Markdown file: page number, the
+// highlighted source text it's attached to (when the annotation type has
+// one), and the comment text itself.
+
+// Reads annotations from a throwaway, standalone PDFDocumentProxy rather
+// than the live app.pdfDocument, and rather than reloading the live viewer
+// the way revertToSessionStart's strip-all branch does. Both matter:
+// page.getAnnotations() only reflects the worker's already-parsed
+// structure, not live annotationStorage edits, so *some* fresh serialize is
+// required to see this session's unsaved comments — but reloading the
+// *live* document (loadPdfIntoViewer) would wipe pdf.js's own in-editor
+// undo/redo stack and visibly reset scroll position, neither of which is
+// acceptable for a read-only export action. app.pdfDocument.saveDocument()
+// already gives fresh bytes with no other observable side effect on the
+// live document (it's the same call saveNow() uses; the only internal
+// state it touches, annotationStorage's #modified flag via
+// resetModified(), is exactly what every normal autosave tick already
+// resets today) — so those bytes are fed into a second, independent
+// pdfjsLib.getDocument() instead of back into the live viewer.
+async function collectCommentedAnnotations(app) {
+  // saveDocument() itself warns to the console ("annotationStorage is
+  // empty, please use the getData-method instead") whenever nothing was
+  // edited THIS session — a common case here, since exporting doesn't
+  // require having just edited anything. getData() returns the document's
+  // already-loaded bytes as-is, which is exactly equivalent when there's
+  // nothing live in annotationStorage to bake in.
+  const bytes =
+    app.pdfDocument.annotationStorage.size > 0
+      ? await app.pdfDocument.saveDocument()
+      : await app.pdfDocument.getData();
+  // PDFDocumentProxy (the resolved value) has no destroy() of its own —
+  // cleanup lives on the PDFDocumentLoadingTask getDocument() returns
+  // synchronously, so that's what must be kept and destroyed, not the
+  // resolved document.
+  const loadingTask = frame.contentWindow.pdfjsLib.getDocument({ data: bytes });
+
+  try {
+    const tempDoc = await loadingTask.promise;
+    const pages = await Promise.all(
+      Array.from({ length: tempDoc.numPages }, (_, i) => tempDoc.getPage(i + 1))
+    );
+    const annotationsByPage = await Promise.all(pages.map((page) => page.getAnnotations()));
+    const { AnnotationType } = frame.contentWindow.pdfjsLib;
+
+    const entries = [];
+    annotationsByPage.forEach((annotations, pageIndex) => {
+      for (const annotation of annotations) {
+        // Every markup annotation with a comment also produces a separate
+        // Popup annotation that mirrors the exact same /Contents text (see
+        // PopupAnnotation in pdf.worker.mjs) but never carries
+        // overlaidText — without this it duplicates every comment, once
+        // with context and once without.
+        if (annotation.annotationType === AnnotationType.POPUP) continue;
+        const comment = annotation.contentsObj?.str?.trim();
+        if (!comment) continue; // bare highlights/annotations with no note are skipped
+        entries.push({
+          pageNumber: pageIndex + 1,
+          context: typeof annotation.overlaidText === "string" ? annotation.overlaidText.trim() : "",
+          comment,
+          author: annotation.titleObj?.str?.trim() || "",
+          // PDF rect is [x1,y1,x2,y2] in bottom-up coordinates — higher y2 is higher on the page.
+          rectTop: Array.isArray(annotation.rect) ? annotation.rect[3] : 0,
+        });
+      }
+    });
+
+    entries.sort((a, b) => a.pageNumber - b.pageNumber || b.rectTop - a.rectTop);
+    return entries;
+  } finally {
+    await loadingTask.destroy();
+  }
+}
+
+function renderCommentsMarkdown(entries, docTitle) {
+  const lines = [`# Comments — ${docTitle}`, ``, `_Exported ${new Date().toLocaleString()}_`, ``];
+  let currentPage = null;
+  for (const entry of entries) {
+    if (entry.pageNumber !== currentPage) {
+      currentPage = entry.pageNumber;
+      lines.push(`## Page ${currentPage}`, ``);
+    }
+    if (entry.context) {
+      lines.push(`> ${escapeMarkdown(entry.context).replace(/\n/g, "\n> ")}`, ``);
+    }
+    lines.push(escapeMarkdown(entry.comment));
+    if (entry.author) lines.push(``, `— *${escapeMarkdown(entry.author)}*`);
+    lines.push(``, `---`, ``);
+  }
+  return lines.join("\n");
+}
+
+// Suggests "<original's folder>/<name> comments.md" as the native Save
+// dialog's starting point, same convention as computeDefaultCopyPath above.
+async function computeDefaultExportPath(originalPath) {
+  const dir = await dirname(originalPath);
+  const base = await basename(originalPath, ".pdf");
+  return join(dir, `${base} comments.md`);
+}
+
+async function exportComments() {
+  const app = getViewerApp();
+  if (!app || !app.pdfDocument || !currentPath) return;
+
+  setStatus("Preparing comment export…");
+  const entries = await collectCommentedAnnotations(app);
+  if (entries.length === 0) {
+    setStatus("No comments found in this document", "", { toast: true });
+    return;
+  }
+
+  const docTitle = currentTitleBase || filenameFromPath(currentPath);
+  const markdown = renderCommentsMarkdown(entries, docTitle);
+
+  const defaultPath = await computeDefaultExportPath(currentPath);
+  const exportPath = await save({
+    title: "Export Comments As",
+    defaultPath,
+    filters: [{ name: "Markdown", extensions: ["md"] }],
+  });
+  if (!exportPath) return; // user cancelled
+
+  // writeTextFile needs its own fs:allow-write-text-file permission this
+  // app doesn't grant; writeFile (already used for autosave/Save Copy As)
+  // only needs the fs:allow-write-file permission already in
+  // src-tauri/capabilities/default.json, so encode instead of adding a
+  // new capability for a one-off text write.
+  await writeFile(exportPath, new TextEncoder().encode(markdown));
+  setStatus(
+    `Exported ${entries.length} comment${entries.length === 1 ? "" : "s"} to ${exportPath}`,
+    "",
+    { toast: true }
   );
 }
 
