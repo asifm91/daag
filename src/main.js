@@ -225,7 +225,7 @@ function injectSaveButton() {
   button.id = "customSaveButton";
   button.className = "toolbarButton";
   button.type = "button";
-  button.title = "Save annotations into the original PDF file on disk";
+  button.title = "Save annotations into the original PDF file on disk (Ctrl+S)";
   button.disabled = true;
   button.addEventListener("click", () => saveNow({ force: true }));
 
@@ -263,7 +263,7 @@ function injectOpenButton() {
   button.id = "customOpenButton";
   button.className = "toolbarButton";
   button.type = "button";
-  button.title = "Open a different PDF file";
+  button.title = "Open a different PDF file (Ctrl+O)";
   button.addEventListener("click", () =>
     pickAndOpenPdf().catch((err) => {
       console.error(err);
@@ -486,6 +486,30 @@ function attachKeyboardShortcuts(doc) {
   );
 }
 
+// ---- Adding shortcut-key hints to the tool buttons' tooltips ------------
+// Just appending to .title directly would get silently wiped: pdf.js's
+// l10n system (DOMLocalization, web/viewer.mjs) keeps a live
+// MutationObserver on every element that has a data-l10n-id attribute,
+// and re-applies that element's Fluent-sourced title on ANY attribute
+// mutation to it (translateMutations queues it, applyTranslations resets
+// title/aria-label from the translation) — including the very
+// `button.title = ...` set below, on the next animation frame. Removing
+// data-l10n-id/data-l10n-args first opts the button out of that observer
+// permanently (translateMutations only re-queues elements that still
+// carry data-l10n-id), which is safe here because by the time this runs
+// (initializeViewer, after waitForViewer's initializedPromise) pdf.js has
+// already done its one-time initial translation, so `button.title`
+// already holds the real localized text we're appending to.
+function addShortcutHints(doc) {
+  for (const [key, buttonId] of Object.entries(TOOL_BUTTON_ID_BY_KEY)) {
+    const button = doc.getElementById(buttonId);
+    if (!button || !button.title) continue;
+    button.removeAttribute("data-l10n-id");
+    button.removeAttribute("data-l10n-args");
+    button.title = `${button.title} (${key.toUpperCase()})`;
+  }
+}
+
 // ---- Recent-files list ---------------------------------------------------
 // Persisted as a plain array of paths, most-recent-first, in localStorage
 // (outer page's storage, unrelated to the iframe's own pdfjs.preferences
@@ -694,6 +718,7 @@ async function initializeViewer() {
   injectStatusButton();
   blockInternalFileOpen(frame.contentDocument);
   attachKeyboardShortcuts(frame.contentDocument);
+  addShortcutHints(frame.contentDocument);
 
   renderRecentFiles();
 }
