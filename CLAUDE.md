@@ -131,6 +131,36 @@ have their own gaps). Instead:
 the app launched — closing and reopening the same file resets the
 snapshot to whatever's on disk at that point.
 
+The confirmation dialog also has an opt-in checkbox that goes further:
+delete *every* remaining annotation after the revert above, regardless of
+whether it came from an earlier session of this app or a different app
+entirely (`stripAllAnnotations()`). This does NOT go through pdf.js's
+editor/`AnnotationEditorUIManager` machinery at all — no editor instances,
+no editing mode entered (which matters: entering edit mode only
+materializes editors for *rendered* pages, so a "select all + delete"
+approach would silently miss annotations on off-screen pages of a long
+document). Instead it calls `page.getAnnotations()` for every page
+(doesn't require the page to have ever rendered) and writes a deletion
+marker straight into `annotationStorage` for each one, skipping Link/
+Popup/Widget (links and form fields aren't "annotations" a reviewer
+added, and Popup deletion is implicit via a markup annotation's
+`popupRef`). The marker shape —
+`{ id: <annotation's own ref-derived id>, deleted: true, pageIndex,
+popupRef }` — mirrors pdf.js's own internal
+`AnnotationEditor#serializeDeleted()`/`FakeEditor`, the exact mechanism it
+already uses when a user deletes one pre-existing annotation through the
+normal editor UI, found by reading the bundled `pdf.mjs`/`pdf.worker.mjs`
+since none of this is public API. The one easy way to get this wrong: the
+storage **key** matters, not just the value — `pdf.worker.mjs`'s
+`getNewAnnotationsMap()` silently ignores any `annotationStorage` entry
+whose key doesn't start with pdf.js's internal `"pdfjs_internal_editor_"`
+prefix (hardcoded as `PDFJS_ANNOTATION_EDITOR_PREFIX` in main.js, since
+it isn't exported on `globalThis.pdfjsLib`) — keying by the bare
+annotation id instead drops the deletion with no error at all. If this
+ever stops working after a pdf.js upgrade, re-verify both of these
+against the new bundled source before assuming the approach itself is
+wrong.
+
 ### Rust side
 Intentionally thin — just wires up the `dialog`, `fs`, and (for the
 titlebar) `core:window:allow-set-title` capabilities. All real logic is

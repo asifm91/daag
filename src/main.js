@@ -44,6 +44,7 @@ const undoAllDialogEl = document.getElementById("undoAllDialog");
 const undoAllDialogCloseButtonEl = document.getElementById("undoAllDialogCloseButton");
 const undoAllDialogCancelButtonEl = document.getElementById("undoAllDialogCancelButton");
 const undoAllDialogConfirmButtonEl = document.getElementById("undoAllDialogConfirmButton");
+const undoAllStripAllCheckboxEl = document.getElementById("undoAllStripAllCheckbox");
 
 // ---- Status reporting ----------------------------------------------------
 // Every status update — dirty/saving/saved/error, however minor — always
@@ -158,13 +159,25 @@ commenterNameInputEl.addEventListener("keydown", (event) => {
 });
 
 // ---- Undo All confirmation dialog ----------------------------------------
+// Reset to unchecked every time the dialog opens — the stronger,
+// also-strip-pre-existing-annotations option shouldn't silently stick
+// from a previous use.
 function openUndoAllDialog() {
+  undoAllStripAllCheckboxEl.checked = false;
+  undoAllDialogConfirmButtonEl.textContent = "Undo All";
   undoAllDialogEl.showModal();
 }
 
+undoAllStripAllCheckboxEl.addEventListener("change", () => {
+  undoAllDialogConfirmButtonEl.textContent = undoAllStripAllCheckboxEl.checked
+    ? "Remove All Annotations"
+    : "Undo All";
+});
+
 undoAllDialogConfirmButtonEl.addEventListener("click", () => {
+  const stripAllAnnotationsToo = undoAllStripAllCheckboxEl.checked;
   undoAllDialogEl.close();
-  revertToSessionStart().catch((err) => {
+  revertToSessionStart({ stripAllAnnotationsToo }).catch((err) => {
     console.error("Undo All failed:", err);
     reportError("Undo All failed — see console");
   });
@@ -456,7 +469,7 @@ function injectUndoAllButton() {
   button.id = "customUndoAllButton";
   button.className = "toolbarButton";
   button.type = "button";
-  button.title = "Remove all annotations added or changed since this file was opened";
+  button.title = "Remove annotations made this session — optionally all annotations in the file";
   button.disabled = true;
   button.addEventListener("click", openUndoAllDialog);
 
@@ -1294,14 +1307,91 @@ async function saveNow({ force = false } = {}) {
 // annotations to disk before Undo All was clicked, leaving the reverted
 // state unsaved would mean a crash right after clicking it loses nothing
 // visible but silently leaves the old annotations sitting in the file.
-async function revertToSessionStart() {
+async function revertToSessionStart({ stripAllAnnotationsToo = false } = {}) {
   if (!currentPath || !sessionOriginalBytes) return;
   const app = getViewerApp();
   if (!app) return;
 
   await loadPdfIntoViewer(app, currentPath, sessionOriginalBytes.slice());
-  setStatus("Undo All: removed all annotations made this session", "", { toast: true });
+  if (stripAllAnnotationsToo) {
+    await stripAllAnnotations(app);
+    setStatus("Undo All: removed every annotation in this file", "", { toast: true });
+  } else {
+    setStatus("Undo All: removed all annotations made this session", "", { toast: true });
+  }
   await saveNow({ force: true });
+}
+
+// pdf.js's own internal storage-key convention for an annotation-editor
+// entry — NOT part of its public API (globalThis.pdfjsLib), so this is
+// hardcoded rather than imported. Verified against the bundled
+// src/pdfjs/build/pdf.worker.mjs's getNewAnnotationsMap(), which silently
+// ignores any annotationStorage entry whose key does NOT start with this
+// exact prefix (used to select which entries even get considered for the
+// save/delete path below) — and against src/pdfjs/build/pdf.mjs's
+// AnnotationLayer's commentText setter, which stores a comment edit for a
+// non-editor annotation the same way: this prefix + the annotation's own
+// id as the key. Re-verify against the bundled source if this ever stops
+// working after a pdf.js upgrade.
+const PDFJS_ANNOTATION_EDITOR_PREFIX = "pdfjs_internal_editor_";
+
+// ---- "Undo All" checkbox: stripping every annotation, not just this
+// session's --------------------------------------------------------------
+// Goes further than revertToSessionStart alone: after that reload, every
+// remaining annotation is unambiguously pre-existing (this session's own
+// edits are already gone), whether from an earlier session of this app or
+// a different one entirely (Acrobat, etc.) — this deletes all of those
+// too.
+//
+// Deliberately does NOT go through pdf.js's editor/AnnotationEditorUIManager
+// machinery (no AnnotationEditor instances are created, no editing mode is
+// entered) — annotationStorage happily stores a plain object as a value
+// (its `serializable` getter only calls `.serialize()` on values that are
+// actual AnnotationEditor instances; anything else is used as-is), and the
+// exact minimal shape needed is the same one pdf.js's own internal
+// AnnotationEditor#serializeDeleted()/FakeEditor produce (the mechanism it
+// already uses whenever a user deletes ONE pre-existing annotation through
+// the normal editor UI): `{ id: <the annotation's own ref-derived id>,
+// deleted: true, pageIndex, popupRef }`, stored under a key built from
+// PDFJS_ANNOTATION_EDITOR_PREFIX (see above — using the bare id as the key
+// looks reasonable but silently drops the deletion with no error).
+//
+// getAnnotations() is called per-page rather than relying on any
+// AnnotationEditorUIManager state (e.g. "select all" + delete) precisely
+// because it doesn't require a page to have ever been rendered/scrolled
+// into view — the editor-layer approach would miss annotations on
+// off-screen pages of a long document.
+//
+// Link, Popup, and Widget (form field) annotations are deliberately left
+// alone — those aren't "annotations" in the sense a reviewer adds by hand,
+// and removing them would break in-document navigation or a fillable
+// form. Markup annotation types (Highlight, FreeText, Ink, Stamp, Text,
+// etc.) never override the base Annotation.save() used by saveDocument()'s
+// other, unconditional per-page save pass (only Widget subclasses do, for
+// form field values), so there's no conflict between that pass and the
+// deletion handled here.
+async function stripAllAnnotations(app) {
+  const { pdfDocument } = app;
+  const storage = pdfDocument.annotationStorage;
+  const { AnnotationType } = frame.contentWindow.pdfjsLib;
+  const preserveTypes = new Set([AnnotationType.LINK, AnnotationType.POPUP, AnnotationType.WIDGET]);
+
+  const pages = await Promise.all(
+    Array.from({ length: pdfDocument.numPages }, (_, i) => pdfDocument.getPage(i + 1))
+  );
+  const annotationsByPage = await Promise.all(pages.map((page) => page.getAnnotations()));
+
+  annotationsByPage.forEach((annotations, pageIndex) => {
+    for (const annotation of annotations) {
+      if (!annotation.id || preserveTypes.has(annotation.annotationType)) continue;
+      storage.setValue(`${PDFJS_ANNOTATION_EDITOR_PREFIX}${annotation.id}`, {
+        id: annotation.id,
+        deleted: true,
+        pageIndex,
+        popupRef: annotation.popupRef || "",
+      });
+    }
+  });
 }
 
 // Safety net: even mid-typing, don't let unsaved changes sit forever.

@@ -69,6 +69,8 @@
       #undoAllDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #3a3a3a; }
       #undoAllDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
       #undoAllDialogBody { padding: 16px; font-size: 13px; color: #ccc; line-height: 1.5; }
+      #undoAllStripAllLabel { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; cursor: pointer; }
+      #undoAllStripAllLabel input { margin-top: 2px; accent-color: #a33d3d; }
       #undoAllDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid #3a3a3a; }
       #undoAllDialogFooter button { padding: 6px 14px; font-size: 13px; }
       #undoAllDialogConfirmButton { background: #6b2b2b; border-color: #a33d3d; }
@@ -150,6 +152,11 @@
           This removes every annotation added or changed since this file was
           opened, and saves the file immediately. It cannot be undone.
         </p>
+        <label id="undoAllStripAllLabel">
+          <input id="undoAllStripAllCheckbox" type="checkbox" />
+          Also remove annotations that already existed in the file — including
+          ones made in another app
+        </label>
       </div>
       <div id="undoAllDialogFooter">
         <button id="undoAllDialogCancelButton" type="button">Cancel</button>
