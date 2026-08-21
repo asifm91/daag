@@ -56,6 +56,12 @@ const overwriteCopyDialogOverwriteButtonEl = document.getElementById("overwriteC
 const overwriteCopyDialogCopyButtonEl = document.getElementById("overwriteCopyDialogCopyButton");
 const overwriteCopyDialogRememberCheckboxEl = document.getElementById("overwriteCopyDialogRememberCheckbox");
 const overwriteCopyDialogPathEl = document.getElementById("overwriteCopyDialogPath");
+const continueOrStartOverDialogEl = document.getElementById("continueOrStartOverDialog");
+const continueOrStartOverDialogCloseButtonEl = document.getElementById("continueOrStartOverDialogCloseButton");
+const continueOrStartOverDialogCancelButtonEl = document.getElementById("continueOrStartOverDialogCancelButton");
+const continueOrStartOverDialogStartOverButtonEl = document.getElementById("continueOrStartOverDialogStartOverButton");
+const continueOrStartOverDialogContinueButtonEl = document.getElementById("continueOrStartOverDialogContinueButton");
+const continueOrStartOverDialogPathEl = document.getElementById("continueOrStartOverDialogPath");
 
 // ---- Status reporting ----------------------------------------------------
 // Every status update — dirty/saving/saved/error, however minor — always
@@ -307,6 +313,56 @@ function promptOverwriteOrCopy(originalPath) {
     overwriteCopyDialogRememberCheckboxEl.checked = true; // always defaults checked
     overwriteCopyDialogPathEl.textContent = originalPath;
     overwriteCopyDialogEl.showModal();
+  });
+}
+
+// ---- Continue-with-copy-or-start-over prompt dialog -----------------------
+// Shown by resolveOpenTarget() (below) whenever the original being opened
+// already has a remembered "copy" mapping and that copy still exists —
+// i.e. right before what used to be a silent redirect to the copy. Same
+// settle-slot pattern as promptOverwriteOrCopy above, kept as a separate
+// dialog/slot since the two can never be open at the same time (both only
+// ever run from within resolveOpenTarget, serialized by openPath's
+// openInFlight queue) but represent different questions.
+let settleContinueOrStartOverPrompt = null;
+
+function resolveContinueOrStartOverPrompt(result) {
+  const settle = settleContinueOrStartOverPrompt;
+  settleContinueOrStartOverPrompt = null; // clear BEFORE close() so the "close" listener below is a no-op
+  continueOrStartOverDialogEl.close();
+  settle?.(result);
+}
+
+continueOrStartOverDialogContinueButtonEl.addEventListener("click", () =>
+  resolveContinueOrStartOverPrompt("continue")
+);
+continueOrStartOverDialogStartOverButtonEl.addEventListener("click", () =>
+  resolveContinueOrStartOverPrompt("startOver")
+);
+continueOrStartOverDialogCancelButtonEl.addEventListener("click", () => resolveContinueOrStartOverPrompt(null));
+continueOrStartOverDialogCloseButtonEl.addEventListener("click", () => resolveContinueOrStartOverPrompt(null));
+continueOrStartOverDialogEl.addEventListener("click", (event) => {
+  if (event.target === continueOrStartOverDialogEl) resolveContinueOrStartOverPrompt(null);
+});
+// Escape fires "cancel" then "close" without going through any button
+// handler above — must be caught separately or the promise never settles.
+continueOrStartOverDialogEl.addEventListener("cancel", () => resolveContinueOrStartOverPrompt(null));
+// Belt-and-suspenders: however else the dialog ends up closed, still
+// settle instead of leaking the promise pending forever.
+continueOrStartOverDialogEl.addEventListener("close", () => {
+  const settle = settleContinueOrStartOverPrompt;
+  settleContinueOrStartOverPrompt = null;
+  settle?.(null);
+});
+
+// Not safe to call while a previous call's dialog is still open (showModal()
+// throws on an already-open <dialog>) — openPath's single-flight queue (see
+// openInFlight below) guarantees at most one caller is ever pending.
+function promptContinueOrStartOver(originalPath, copyPath) {
+  return new Promise((resolve) => {
+    settleContinueOrStartOverPrompt = resolve;
+    continueOrStartOverDialogPathEl.textContent = copyPath;
+    continueOrStartOverDialogEl.showModal();
   });
 }
 
@@ -1112,12 +1168,27 @@ async function resolveOpenTarget(originalPath) {
   }
   if (mapping?.mode === "copy") {
     if (await exists(mapping.copyPath)) {
-      return { targetPath: mapping.copyPath, bytes: await readFile(mapping.copyPath) };
+      const decision = await promptContinueOrStartOver(originalPath, mapping.copyPath);
+      if (!decision) return null; // cancelled — abort the whole open
+      if (decision === "continue") {
+        return { targetPath: mapping.copyPath, bytes: await readFile(mapping.copyPath) };
+      }
+      // "startOver" — forget the copy's association with this original,
+      // but give the copy file its own independent mapping (keyed by its
+      // own path, mode "overwrite") so it isn't left as a dangling
+      // reference: opening that copy file directly later behaves like any
+      // other plain overwrite-mode file — no re-prompt, no copy-of-a-copy.
+      // Then fall through and re-decide originalPath exactly like a file
+      // that was never opened before (same settings-driven ask/overwrite/
+      // copy flow below).
+      clearCopyMapping(originalPath);
+      setCopyMapping(mapping.copyPath, { mode: "overwrite" });
+    } else {
+      // The remembered copy was moved/deleted since — don't silently fall
+      // back to clobbering the original; forget the stale mapping and
+      // re-decide from scratch below, same as a file never opened before.
+      clearCopyMapping(originalPath);
     }
-    // The remembered copy was moved/deleted since — don't silently fall
-    // back to clobbering the original; forget the stale mapping and
-    // re-decide from scratch below, same as a file never opened before.
-    clearCopyMapping(originalPath);
   }
 
   const bytes = await readIfExists(originalPath);
