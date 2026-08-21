@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>PDF Annotator</title>
+    <style>
+      html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; background: #2b2b2b; color: #eee; }
+      #toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #1e1e1e; border-bottom: 1px solid #000; }
+      button { background: #3a3a3a; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+      button:hover { background: #474747; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      #status { font-size: 13px; color: #9ad19a; margin-left: auto; }
+      #status.dirty { color: #e0c46c; }
+      #status.error { color: #e06c6c; }
+      #viewerFrame { width: 100%; height: calc(100% - 45px); border: none; background: #525659; }
+    </style>
+  </head>
+  <body>
+    <div id="toolbar">
+      <button id="openBtn">Open PDF…</button>
+      <button id="saveBtn" disabled>Save Now</button>
+      <span id="status">No file open</span>
+    </div>
+
+    <!--
+      The pdf.js "generic" prebuilt viewer.
+      Download a release from https://github.com/mozilla/pdf.js/releases
+      (grab the pdfjs-<version>-dist.zip asset) and unzip its contents
+      into src/pdfjs/ so that src/pdfjs/web/viewer.html exists.
+      Because it's same-origin (served by Tauri/vite), main.js can reach
+      straight into its window object — no blob-URL / postMessage dance needed.
+
+      `src` is intentionally left unset here — main.js seeds
+      localStorage["pdfjs.preferences"] with our viewer preferences
+      (highlight floating button, comments) and only then points this
+      iframe at viewer.html, so pdf.js's Preferences class (which reads
+      that key once during startup, before annotationEditorMode setup)
+      always sees them in time.
+    -->
+    <iframe id="viewerFrame"></iframe>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

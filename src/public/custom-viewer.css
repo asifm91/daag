@@ -1,0 +1,51 @@
+/*
+ * Styling for elements main.js injects into the embedded pdf.js viewer
+ * (see ensureCustomStylesheetLoaded() in src/main.js).
+ *
+ * This MUST be a real external stylesheet, not a <style> tag inserted via
+ * JS. web/viewer.html ships its own CSP meta tag scoped to that document
+ * (`style-src 'self'`, no 'unsafe-inline') — it silently drops the rules
+ * of any inline <style> element or style="" attribute (Chromium logs a
+ * console warning, but nothing throws), while still letting the plain DOM
+ * elements it's attached to render using pdf.js's own already-loaded
+ * viewer.css defaults. That's what made this so easy to miss: our Save
+ * button still appeared, just as pdf.js's bare unstyled .toolbarButton
+ * square instead of our icon, and the native download button's hide rule
+ * silently did nothing either.
+ *
+ * A same-origin <link rel="stylesheet"> satisfies style-src 'self', and
+ * the mask-image data: URI further down is allowed separately under this
+ * CSP's img-src ('self' blob: data:), so everything here is loaded via a
+ * single <link> from main.js instead of ad hoc inline <style> tags.
+ *
+ * Lives in src/public (Vite's default publicDir, served from the site
+ * root) rather than inside src/pdfjs/, so a future pdf.js upgrade — which
+ * drops in a whole new web/ folder — can't silently delete it.
+ */
+
+/* ---- Our own toolbar Save button -----------------------------------------
+ * pdf.js's own toolbar "Save" controls are actually Save As (blob: URL +
+ * synthetic <a download>), which Tauri's WebView2 doesn't wire up — see
+ * the comment above injectSaveButton() in main.js for the full story. */
+#downloadButton,
+#secondaryDownload {
+  display: none;
+}
+
+/* A floppy-disk glyph: one path, two rectangular holes. The holes are
+   wound in the opposite direction from the outer square on purpose —
+   with fill-rule="evenodd" that's redundant (evenodd only cares about
+   crossing count, not direction), but winding them oppositely also makes
+   the hole cutouts correct under the default nonzero fill-rule, so the
+   shape doesn't depend on fill-rule surviving the trip through a CSS
+   mask-image data: URI as anything more than a defensive fallback. */
+#customSaveButton::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' clip-rule='evenodd' fill='black' d='M1 1H15V15H1V1Z M4 2V6H10V2Z M3 9V14H13V9Z'/%3E%3C/svg%3E");
+          mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' clip-rule='evenodd' fill='black' d='M1 1H15V15H1V1Z M4 2V6H10V2Z M3 9V14H13V9Z'/%3E%3C/svg%3E");
+}
+
+#customSaveButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
