@@ -352,6 +352,12 @@ function updateStatusIndicator(kind) {
 // first — and calling preventDefault() on dragover/drop also suppresses
 // the browser's own default behavior for a dropped file (navigating the
 // whole webview to it), not just pdf.js's.
+//
+// Drag-and-drop has no safe substitute (still just blocked, with an error
+// toast pointing at the toolbar button), but Ctrl+O does: since it's
+// already fully intercepted here before pdf.js's own handler ever sees
+// it, there's no reason to just show an error — redirect it straight to
+// pickAndOpenPdf(), the same picker the toolbar Open button uses.
 let internalFileOpenBlocked = false;
 function blockInternalFileOpen(doc) {
   if (internalFileOpenBlocked) return;
@@ -373,7 +379,108 @@ function blockInternalFileOpen(doc) {
         !event.altKey &&
         !event.shiftKey &&
         event.key?.toLowerCase() === "o";
-      if (isOpenShortcut) block(event);
+      if (!isOpenShortcut || event.repeat) return;
+      event.preventDefault();
+      event.stopPropagation();
+      pickAndOpenPdf().catch((err) => {
+        console.error(err);
+        reportError("Failed to open file — see console");
+      });
+    },
+    { capture: true }
+  );
+}
+
+// ---- Keyboard shortcuts: Save, and the annotation tools -----------------
+// Ctrl+O is handled above in blockInternalFileOpen (already intercepted
+// there to block pdf.js's unsafe internal open, so it's redirected to the
+// real open path in the same place rather than adding a second listener
+// for the same key here).
+//
+// Ctrl+S: pdf.js's own handler (web/viewer.mjs onKeyDown) binds bare
+// Ctrl+S to the "download" event — its Save-As button, which is broken in
+// this embedding (see injectSaveButton above) and completely unrelated to
+// our real save path. Intercepted the same way as Ctrl+O: a capture-phase
+// listener on the iframe's document, which runs before pdf.js's own
+// bubble-phase listener on window regardless of registration order.
+//
+// Text/Draw/Highlight: bare letters A/D/F, chosen to avoid every bare-
+// letter shortcut pdf.js already binds in the same handler — H, J, K, N,
+// P, R, S (cursor tools and page-turning) — so none of these collide.
+// "Images" (Stamp) deliberately has no shortcut.
+//
+// Comment (C) is deliberately NOT wired to editorCommentButton — that
+// toolbar button toggles AnnotationEditorType.POPUP, which opens the
+// read-only "all comments" sidebar, not "add a comment on the text I just
+// selected". The actual add-a-comment-on-selection action is what pdf.js's
+// own floating Comment button does when it appears over a text selection
+// (enableComment + enableHighlightFloatingButton, both on — see
+// configurePdfjsPreferences below): FloatingToolbar (pdf.mjs) wires that
+// button's click straight to `uiManager.commentSelection("floating_button")`.
+// C calls that same UI-manager method directly — it no-ops harmlessly if
+// there's no active selection (highlightSelection() bails out on
+// `selection.isCollapsed`), same as the real button would.
+//
+// Bare letters mean this needs the same "not while typing" guard pdf.js
+// applies before running its own H/S/R/etc (onKeyDown's curElementTagName
+// check) — without it, typing a comment or free-text annotation
+// containing any of these letters would toggle tools out from under you
+// mid-edit. Reimplemented here against the iframe's own activeElement
+// rather than reusing pdf.js's private getActiveOrFocusedElement().
+function isTypingTarget(doc) {
+  const el = doc.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+}
+
+const TOOL_BUTTON_ID_BY_KEY = {
+  a: "editorFreeTextButton",
+  d: "editorInkButton",
+  f: "editorHighlightButton",
+};
+
+let keyboardShortcutsAttached = false;
+function attachKeyboardShortcuts(doc) {
+  if (keyboardShortcutsAttached) return;
+  keyboardShortcutsAttached = true;
+
+  doc.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.repeat) return;
+
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
+        if (event.key?.toLowerCase() === "s") {
+          event.preventDefault();
+          event.stopPropagation();
+          saveNow({ force: true });
+        }
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      if (isTypingTarget(doc)) return;
+
+      const key = event.key?.toLowerCase();
+
+      if (key === "c") {
+        const uiManager = getViewerApp()?.pdfViewer?._layerProperties?.annotationEditorUIManager;
+        if (uiManager?.commentSelection) {
+          event.preventDefault();
+          event.stopPropagation();
+          uiManager.commentSelection("floating_button");
+        }
+        return;
+      }
+
+      const buttonId = TOOL_BUTTON_ID_BY_KEY[key];
+      if (!buttonId) return;
+      const button = doc.getElementById(buttonId);
+      if (button && !button.disabled) {
+        event.preventDefault();
+        event.stopPropagation();
+        button.click();
+      }
     },
     { capture: true }
   );
@@ -567,12 +674,13 @@ async function pickAndOpenPdf() {
 // ---- App-wide viewer setup (runs once, independent of any open file) ---
 // attachCommentSaveHook/attachUndoRedoHook listen on the persistent
 // app.eventBus, injectSaveButton/injectOpenButton just create toolbar
-// buttons, and blockInternalFileOpen must be active *before* the user
-// ever opens a file through us — its whole point is closing off pdf.js's
-// own "Open File" paths, which are reachable from the very first landing
-// screen (Tools-menu entry, drag-and-drop) with no dependency on a file
-// ever having been opened through us. None of this belongs gated behind
-// our own Open button.
+// buttons, and blockInternalFileOpen/attachKeyboardShortcuts must be
+// active *before* the user ever opens a file through us — closing off
+// pdf.js's own "Open File" paths and taking over Ctrl+O/Ctrl+S are both
+// reachable from the very first landing screen (Tools-menu entry,
+// drag-and-drop, the keys themselves) with no dependency on a file ever
+// having been opened through us. None of this belongs gated behind our
+// own Open button.
 //
 // Deliberately does NOT auto-reopen the most recent file — the landing
 // screen (Open button + recent-files list) is always what greets you on
@@ -585,6 +693,7 @@ async function initializeViewer() {
   injectOpenButton();
   injectStatusButton();
   blockInternalFileOpen(frame.contentDocument);
+  attachKeyboardShortcuts(frame.contentDocument);
 
   renderRecentFiles();
 }
@@ -684,8 +793,37 @@ function attachCommentSaveHook(app) {
 // around just this one call is exact — no timing assumptions about *when*
 // within a broader async operation the false-positive call happens to
 // land, unlike the updateMode-wide version above.
+//
+// removeEditor(editor) needs the exact same annotationElementId-gated
+// suppression, for a different false positive: opening/closing ANY
+// toolbar tool popup (not just the Comment sidebar) churns every
+// pre-existing editor through an internal detach/reattach, and
+// AnnotationEditorUIManager.removeEditor() (pdf.mjs) unconditionally
+// calls annotationStorage.remove(editor.id) as part of that housekeeping
+// — one call per pre-existing annotation in the file, all in the same
+// synchronous burst, each tripping the patched storage.remove() below and
+// firing markDirty(). Confirmed by a temporary diagnostic build: a single
+// popup open/close on a 29-annotation file produced exactly 29
+// back-to-back "Unsaved changes" log entries, none of them from
+// setValue()/onSetModified (which pdf.js itself only fires once per dirty
+// session — it can't produce a 29-wide burst on its own). Safe to
+// suppress here: a *genuine* deletion of a pre-existing annotation goes
+// through AnnotationEditorUIManager.delete() → addCommands({mustExec:
+// true}) first (pdf.mjs), which the addCommands patch above already
+// marks dirty for — so the removeEditor()-triggered storage.remove() for
+// an annotationElementId-tagged editor is always redundant with an
+// already-correct signal, never the only one.
 let undoRedoHookAttached = false;
 let suppressDirty = false;
+function withDirtySuppressed(fn) {
+  const wasSuppressed = suppressDirty;
+  suppressDirty = true;
+  try {
+    fn();
+  } finally {
+    suppressDirty = wasSuppressed;
+  }
+}
 function attachUndoRedoHook(app) {
   if (undoRedoHookAttached) return;
   undoRedoHookAttached = true;
@@ -709,15 +847,17 @@ function attachUndoRedoHook(app) {
     const originalAddToAnnotationStorage = uiManager.addToAnnotationStorage.bind(uiManager);
     uiManager.addToAnnotationStorage = (editor) => {
       if (editor?.annotationElementId) {
-        const wasSuppressed = suppressDirty;
-        suppressDirty = true;
-        try {
-          originalAddToAnnotationStorage(editor);
-        } finally {
-          suppressDirty = wasSuppressed;
-        }
+        withDirtySuppressed(() => originalAddToAnnotationStorage(editor));
       } else {
         originalAddToAnnotationStorage(editor);
+      }
+    };
+    const originalRemoveEditor = uiManager.removeEditor.bind(uiManager);
+    uiManager.removeEditor = (editor) => {
+      if (editor?.annotationElementId) {
+        withDirtySuppressed(() => originalRemoveEditor(editor));
+      } else {
+        originalRemoveEditor(editor);
       }
     };
   });

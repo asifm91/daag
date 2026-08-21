@@ -86,9 +86,10 @@ the full list. The net result, wired up in `attachAnnotationHooks`,
   own.
 - Patch `AnnotationEditorUIManager.addCommands`/`undo`/`redo` — covers
   recoloring, resizing, moving, and undo/redo of any of the above.
-- Patch `addToAnnotationStorage()` specifically (gated on
-  `editor.annotationElementId`) — needed to avoid a false-positive dirty
-  flag when merely opening the read-only Comment sidebar.
+- Patch `addToAnnotationStorage()` and `removeEditor()`, both gated on
+  `editor.annotationElementId` — needed to avoid a false-positive dirty
+  flag when merely opening the read-only Comment sidebar, or any toolbar
+  popup at all (see Known rough edges below).
 - Listen for pdf.js's own `reporttelemetry` eventBus events — the only
   signal for comment edits/deletions, which don't touch
   `annotationStorage` at all.
@@ -211,6 +212,29 @@ tab or an embedder that replicates browser behavior:
   suppression around the *exact* synchronous call that causes it (here,
   `addToAnnotationStorage` gated on `editor.annotationElementId`), not
   around a broader operation that happens to also trigger it.
+- **Opening/closing *any* toolbar tool popup churns every pre-existing
+  annotation through storage, not just the Comment sidebar.**
+  Second instance of the false-positive above, found later: toggling any
+  editor-mode toolbar button (Highlight, Text, Draw, not just Comment)
+  makes `AnnotationEditorUIManager.removeEditor()` (pdf.mjs) unconditionally
+  call `annotationStorage.remove(editor.id)` as part of its internal
+  detach/reattach housekeeping — once per pre-existing annotation in the
+  file, all in the same synchronous burst. Confirmed via a temporary
+  diagnostic build: one popup open/close on a 29-annotation file produced
+  29 back-to-back "Unsaved changes" log entries, none from
+  `setValue()`/`onSetModified` (pdf.js only fires that once per dirty
+  session — it can't produce a burst that wide on its own; the tell that
+  it must be `storage.remove()` instead, which we call `markDirty()` for
+  unconditionally on every invocation). Fixed the same way as
+  `addToAnnotationStorage`: gate suppression on `editor.annotationElementId`
+  around the `removeEditor()` call specifically. Safe to suppress — a
+  *genuine* deletion of a pre-existing annotation goes through
+  `AnnotationEditorUIManager.delete()` → `addCommands({mustExec: true})`
+  first, which the `addCommands` patch already marks dirty for, so the
+  `removeEditor()`-triggered `storage.remove()` is always redundant with
+  an already-correct signal for that case, never the only one. If a
+  *third* instance of this pattern turns up, suspect any pdf.js internal
+  method that iterates `#allEditors`/`#allLayers` first.
 - **pdf.js ships a bundled sample PDF as its default.**
   `compressed.tracemonkey-pldi-09.pdf`, auto-opened via `defaultUrl`
   whenever there's no `?file=` query string — always true for us. Not
@@ -245,7 +269,7 @@ tab or an embedder that replicates browser behavior:
   next one rather than inventing a new mechanism.
 - When patching a pdf.js method to observe something it doesn't expose an
   event for (`addCommands`, `undo`, `redo`, `addToAnnotationStorage`,
-  `annotationStorage.remove`), the target methods are plain (non-private,
+  `removeEditor`, `annotationStorage.remove`), the target methods are plain (non-private,
   non-`#`-prefixed) instance methods — safe to wrap by reassignment
   (`const original = obj.method.bind(obj); obj.method = (...args) => {
   original(...args); /* observe */ };`). Confirm the method isn't a
