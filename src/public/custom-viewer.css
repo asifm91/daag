@@ -26,9 +26,14 @@
 /* ---- Our own toolbar Save button -----------------------------------------
  * pdf.js's own toolbar "Save" controls are actually Save As (blob: URL +
  * synthetic <a download>), which Tauri's WebView2 doesn't wire up — see
- * the comment above injectSaveButton() in main.js for the full story. */
+ * the comment above injectSaveButton() in main.js for the full story.
+ *
+ * #secondaryOpenFile is hidden for a related but more serious reason: see
+ * blockInternalFileOpen() in main.js — opening a file this way silently
+ * corrupts the *previous* file on next save. */
 #downloadButton,
-#secondaryDownload {
+#secondaryDownload,
+#secondaryOpenFile {
   display: none;
 }
 
@@ -48,4 +53,11 @@
   opacity: 0.4;
   cursor: not-allowed;
   pointer-events: none;
+}
+
+/* A tabbed-folder glyph, single solid path (no cutouts needed — unlike
+   the save icon, nothing here overlaps). */
+#customOpenButton::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M1 5V14H15V6H7L6 4H1Z'/%3E%3C/svg%3E");
+          mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M1 5V14H15V6H7L6 4H1Z'/%3E%3C/svg%3E");
 }

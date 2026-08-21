@@ -9,15 +9,37 @@ let autosaveTimer = null;
 
 const AUTOSAVE_DEBOUNCE_MS = 4000; // save 4s after the last edit
 const AUTOSAVE_MAX_WAIT_MS = 20000; // ...but never wait longer than this
+const RECENT_FILES_KEY = "pdfAnnotator.recentFiles";
+const MAX_RECENT_FILES = 8;
 
+const landingScreen = document.getElementById("landingScreen");
+const viewerScreen = document.getElementById("viewerScreen");
 const openBtn = document.getElementById("openBtn");
 const saveBtn = document.getElementById("saveBtn");
 const statusEl = document.getElementById("status");
+const landingStatusEl = document.getElementById("landingStatus");
+const recentFilesListEl = document.getElementById("recentFilesList");
 const frame = document.getElementById("viewerFrame");
 
 function setStatus(text, kind = "") {
   statusEl.textContent = text;
   statusEl.className = kind;
+}
+
+// Mirrors an error onto whichever screen is actually visible — openPath()
+// can fail while either one is showing (a stale recent-files entry is
+// clicked on the landing screen; a startup auto-reopen fails before the
+// viewer screen is ever shown), and #status lives inside viewerScreen so
+// it's invisible while landingScreen is up.
+function reportError(message) {
+  setStatus(message, "error");
+  landingStatusEl.textContent = message;
+  landingStatusEl.className = "error";
+}
+
+function showViewer() {
+  landingScreen.classList.add("hidden");
+  viewerScreen.classList.remove("hidden");
 }
 
 // ---- Configuring the embedded pdf.js viewer ----------------------------
@@ -50,6 +72,29 @@ function configurePdfjsPreferences() {
   });
   localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
 }
+
+// ---- Suppressing pdf.js's bundled sample PDF ---------------------------
+// The "generic" build ships compressed.tracemonkey-pldi-09.pdf as its
+// `defaultUrl` option and auto-opens it on startup whenever there's no
+// `?file=` query string on viewer.html — which is always the case here
+// (see web/viewer.mjs: `file = params.get("file") ?? AppOptions.get
+// ("defaultUrl")`, then `if (file) this.open({url: file})`). We want an
+// empty state (or the reopened last file, below) instead.
+//
+// defaultUrl isn't tagged `OptionKind.PREFERENCE`, so it can't be
+// overridden via the localStorage trick configurePdfjsPreferences() uses
+// for enableComment/enableHighlightFloatingButton — pdf.js's Preferences
+// class only merges storage values for options that opted into that. But
+// viewer.mjs dispatches a cancelable "webviewerloaded" CustomEvent on
+// *our* document, with `detail.source` set to the iframe's window, right
+// before it calls `PDFViewerApplication.run(config)` — the officially
+// intended embedding hook for exactly this kind of pre-run override, and
+// synchronous/ordered by construction, so there's no DOMContentLoaded
+// timing race to worry about the way there would be if we tried to reach
+// into the iframe ourselves from the outside.
+document.addEventListener("webviewerloaded", (event) => {
+  event.detail?.source?.PDFViewerApplicationOptions?.set("defaultUrl", "");
+});
 
 configurePdfjsPreferences();
 frame.src = "pdfjs/web/viewer.html";
@@ -141,20 +186,169 @@ function injectSaveButton() {
   toolbarSaveButton = button;
 }
 
-// ---- Opening a file -----------------------------------------------------
-async function openPdf() {
-  const path = await open({
-    multiple: false,
-    filters: [{ name: "PDF", extensions: ["pdf"] }],
-  });
-  if (!path) return; // user cancelled
+// ---- Adding our own Open button to pdf.js's toolbar ---------------------
+// Once a document is open, the outer landing screen's Open button and
+// recent-files list are hidden (see showViewer()) — this is how you open
+// a different file without pdf.js's own broken/blocked internal paths
+// (see blockInternalFileOpen below) while already viewing something.
+// Injected the same way and for the same reason as injectSaveButton
+// above: DOM, not a viewer.html edit, so a pdf.js upgrade can't silently
+// erase it. Never disabled — unlike Save, opening doesn't depend on a
+// document already being loaded.
+let toolbarOpenButton = null;
+function injectOpenButton() {
+  if (toolbarOpenButton) return;
+  const doc = frame.contentDocument;
+  const downloadButton = doc.getElementById("downloadButton");
+  const group = downloadButton && downloadButton.closest(".toolbarHorizontalGroup");
+  if (!group) return;
 
-  const bytes = await readFile(path);
-  const app = await waitForViewer();
-  attachCommentSaveHook(app);
-  attachUndoRedoHook(app);
-  injectSaveButton();
+  ensureCustomStylesheetLoaded(doc);
 
+  const button = doc.createElement("button");
+  button.id = "customOpenButton";
+  button.className = "toolbarButton";
+  button.type = "button";
+  button.title = "Open a different PDF file";
+  button.addEventListener("click", () =>
+    pickAndOpenPdf().catch((err) => {
+      console.error(err);
+      reportError("Failed to open file — see console");
+    })
+  );
+
+  const label = doc.createElement("span");
+  label.textContent = "Open File";
+  button.appendChild(label);
+
+  // Before Save (falls back to appending if injectSaveButton hasn't run
+  // yet for some reason) so the toolbar reads left-to-right as Open, Save.
+  group.insertBefore(button, toolbarSaveButton || null);
+
+  toolbarOpenButton = button;
+}
+
+// ---- Blocking pdf.js's own internal "Open File" paths -------------------
+// pdf.js has three ways to open a *different* PDF that completely bypass
+// openPath()/pickAndOpenPdf() below: the "Open File…" entry in its overflow Tools menu
+// (#secondaryOpenFile, hidden in custom-viewer.css), dropping a PDF onto
+// the viewer, and Ctrl+O / Cmd+O — the latter two wired as plain
+// `window.addEventListener("drop"/"keydown", ..., {signal})` calls in
+// web/viewer.mjs with no capture flag, i.e. bubble phase (the drop target
+// is appConfig.mainContainer; the keydown target is window itself, whose
+// own bubble-phase listener is the very last thing to run in the whole
+// propagation path). All three read the file through the browser's File
+// API and call `app.open({ url: URL.createObjectURL(file), ... })`
+// directly, which never touches currentPath. If any ran, the document
+// itself would load and mostly work (attachCommentSaveHook/
+// attachUndoRedoHook are wired to the persistent app.eventBus, so they'd
+// still fire), but currentPath would keep pointing at the *previous*
+// file — so the next autosave would silently write the newly opened
+// document's bytes over the OLD file on disk, destroying it, while the
+// file that was actually opened never gets touched at its real path at
+// all. There's no way to instead track the newly opened file's path and
+// make this safe: the browser File API never exposes a real absolute
+// filesystem path, only a filename, so pdf.js-internal opens can't be
+// made autosave-safe in this app regardless of how we wire things up.
+//
+// Hiding the button covers one path; drag-and-drop and Ctrl+O have no
+// button to hide, so we intercept the events directly. A capture-phase
+// listener on the iframe's document fires before ANY bubble-phase
+// listener further along the same propagation path (including one on
+// window itself) ever sees the event, regardless of which was registered
+// first — and calling preventDefault() on dragover/drop also suppresses
+// the browser's own default behavior for a dropped file (navigating the
+// whole webview to it), not just pdf.js's.
+let internalFileOpenBlocked = false;
+function blockInternalFileOpen(doc) {
+  if (internalFileOpenBlocked) return;
+  internalFileOpenBlocked = true;
+  const block = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.type !== "dragover") {
+      setStatus("Use the Open button in the toolbar to open a file", "error");
+    }
+  };
+  doc.addEventListener("dragover", block, { capture: true });
+  doc.addEventListener("drop", block, { capture: true });
+  doc.addEventListener(
+    "keydown",
+    (event) => {
+      const isOpenShortcut =
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key?.toLowerCase() === "o";
+      if (isOpenShortcut) block(event);
+    },
+    { capture: true }
+  );
+}
+
+// ---- Recent-files list ---------------------------------------------------
+// Persisted as a plain array of paths, most-recent-first, in localStorage
+// (outer page's storage, unrelated to the iframe's own pdfjs.preferences
+// key above). The first entry doubles as "the last-opened file" for the
+// startup auto-reopen in initializeViewer() below — no separate key to
+// keep in sync.
+function getRecentFiles() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECENT_FILES_KEY));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function addToRecentFiles(path) {
+  const files = [path, ...getRecentFiles().filter((p) => p !== path)].slice(0, MAX_RECENT_FILES);
+  localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(files));
+}
+
+function removeFromRecentFiles(path) {
+  localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(getRecentFiles().filter((p) => p !== path)));
+}
+
+function filenameFromPath(path) {
+  return path.split(/[\\/]/).pop() || path;
+}
+
+function renderRecentFiles() {
+  const files = getRecentFiles();
+  recentFilesListEl.replaceChildren();
+
+  if (files.length === 0) {
+    const empty = document.createElement("li");
+    empty.id = "recentFilesEmpty";
+    empty.textContent = "No recent files";
+    recentFilesListEl.appendChild(empty);
+    return;
+  }
+
+  for (const path of files) {
+    const li = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = filenameFromPath(path);
+    button.title = path;
+    button.addEventListener("click", () => {
+      openPath(path).catch((err) => {
+        console.error(err);
+        reportError("Failed to open file — see console");
+      });
+    });
+    li.appendChild(button);
+    recentFilesListEl.appendChild(li);
+  }
+}
+
+// ---- Loading a document into the viewer ---------------------------------
+// Shared by every way a document can end up open — the outer/toolbar Open
+// buttons, a recent-files click, and the startup auto-reopen below — so
+// all of them end up in the exact same state: currentPath set, save
+// buttons enabled, annotation hooks attached, recent-files list updated.
+async function loadPdfIntoViewer(app, path, bytes) {
   // `open()` accepts a plain Uint8Array under `data`. Some pdf.js versions
   // want { data: bytes } directly, older ones wrap it differently —
   // check your bundled version if this throws.
@@ -165,9 +359,71 @@ async function openPdf() {
   saveBtn.disabled = false;
   if (toolbarSaveButton) toolbarSaveButton.disabled = false;
   setStatus(`Open: ${path}`);
+  addToRecentFiles(path);
+  renderRecentFiles();
 
   attachAnnotationHooks(app);
 }
+
+// ---- Opening a file by path, with graceful failure -----------------------
+// The one thing every entry point funnels through once a *path* is known
+// (as opposed to pickAndOpenPdf() below, which is how a path is chosen in
+// the first place). Checks the file still exists before trying to read
+// it — covers a recent-files entry whose file has since been moved or
+// deleted, and the startup auto-reopen of the most recent one — and on
+// any failure, prunes that entry so it doesn't keep showing a dead link,
+// then reports the error onto whichever screen is actually visible.
+async function openPath(path) {
+  try {
+    if (!(await exists(path))) {
+      throw new Error("file no longer exists");
+    }
+    const bytes = await readFile(path);
+    const app = await waitForViewer();
+    await loadPdfIntoViewer(app, path, bytes);
+    showViewer();
+  } catch (err) {
+    console.error("Could not open PDF:", err);
+    removeFromRecentFiles(path);
+    renderRecentFiles();
+    reportError(`Could not open ${filenameFromPath(path)} — it may have moved or been deleted`);
+  }
+}
+
+async function pickAndOpenPdf() {
+  const path = await open({
+    multiple: false,
+    filters: [{ name: "PDF", extensions: ["pdf"] }],
+  });
+  if (!path) return; // user cancelled
+  await openPath(path);
+}
+
+// ---- App-wide viewer setup (runs once, independent of any open file) ---
+// attachCommentSaveHook/attachUndoRedoHook listen on the persistent
+// app.eventBus, injectSaveButton/injectOpenButton just create toolbar
+// buttons, and blockInternalFileOpen must be active *before* the user
+// ever opens a file through us — its whole point is closing off pdf.js's
+// own "Open File" paths, which are reachable from the very first landing
+// screen (Tools-menu entry, drag-and-drop) with no dependency on a file
+// ever having been opened through us. None of this belongs gated behind
+// our own Open button.
+//
+// Deliberately does NOT auto-reopen the most recent file — the landing
+// screen (Open button + recent-files list) is always what greets you on
+// launch; picking a file, from either place, is always an explicit click.
+async function initializeViewer() {
+  const app = await waitForViewer();
+  attachCommentSaveHook(app);
+  attachUndoRedoHook(app);
+  injectSaveButton();
+  injectOpenButton();
+  blockInternalFileOpen(frame.contentDocument);
+
+  renderRecentFiles();
+}
+
+initializeViewer();
 
 // ---- Hooking comment edits for autosave --------------------------------
 // pdf.js's comment-popup Save button (web/viewer.mjs CommentDialog#save)
@@ -413,9 +669,9 @@ setInterval(() => {
 }, AUTOSAVE_MAX_WAIT_MS);
 
 // ---- Wiring up buttons --------------------------------------------------
-openBtn.addEventListener("click", () => openPdf().catch((e) => {
-  console.error(e);
-  setStatus("Failed to open file — see console", "error");
+openBtn.addEventListener("click", () => pickAndOpenPdf().catch((err) => {
+  console.error(err);
+  reportError("Failed to open file — see console");
 }));
 
 saveBtn.addEventListener("click", () => saveNow({ force: true }));

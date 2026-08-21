@@ -5,39 +5,76 @@
     <title>PDF Annotator</title>
     <style>
       html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; background: #2b2b2b; color: #eee; }
-      #toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #1e1e1e; border-bottom: 1px solid #000; }
-      button { background: #3a3a3a; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+      .hidden { display: none !important; }
+
+      button { background: #3a3a3a; color: #eee; border: 1px solid #555; border-radius: 4px; cursor: pointer; }
       button:hover { background: #474747; }
       button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+      /* ---- Landing screen: shown until a file is open ---- */
+      #landingScreen { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; box-sizing: border-box; padding: 24px; }
+      #landingScreen h1 { font-size: 18px; font-weight: 500; color: #bbb; margin: 0; }
+      #openBtn { padding: 10px 22px; font-size: 14px; }
+      #recentFilesPanel { width: min(480px, 100%); }
+      #recentFilesPanel h2 { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; color: #888; margin: 0 0 8px; }
+      #recentFilesList { list-style: none; margin: 0; padding: 0; border: 1px solid #3a3a3a; border-radius: 6px; overflow: hidden; }
+      #recentFilesList li { border-bottom: 1px solid #3a3a3a; }
+      #recentFilesList li:last-child { border-bottom: none; }
+      #recentFilesList button { display: block; width: 100%; box-sizing: border-box; text-align: left; background: none; border: none; border-radius: 0; color: #ddd; padding: 10px 14px; font-size: 13px; }
+      #recentFilesList button:hover { background: #363636; }
+      #recentFilesEmpty { color: #777; font-size: 13px; padding: 10px 14px; }
+      #landingStatus { min-height: 1em; font-size: 13px; }
+      #landingStatus.error { color: #e06c6c; }
+
+      /* ---- Viewer screen: shown once a file is open ---- */
+      #viewerScreen { height: 100%; display: flex; flex-direction: column; }
+      #toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #1e1e1e; border-bottom: 1px solid #000; flex: none; }
+      #toolbar button { padding: 6px 12px; }
       #status { font-size: 13px; color: #9ad19a; margin-left: auto; }
       #status.dirty { color: #e0c46c; }
       #status.error { color: #e06c6c; }
-      #viewerFrame { width: 100%; height: calc(100% - 45px); border: none; background: #525659; }
+      #viewerFrame { flex: 1; width: 100%; border: none; background: #525659; }
     </style>
   </head>
   <body>
-    <div id="toolbar">
+    <!-- Shown until a file is open — see showViewer() in main.js -->
+    <div id="landingScreen">
+      <h1>PDF Annotator</h1>
       <button id="openBtn">Open PDF…</button>
-      <button id="saveBtn" disabled>Save Now</button>
-      <span id="status">No file open</span>
+      <div id="recentFilesPanel">
+        <h2>Recent</h2>
+        <ul id="recentFilesList"></ul>
+      </div>
+      <p id="landingStatus"></p>
     </div>
 
-    <!--
-      The pdf.js "generic" prebuilt viewer.
-      Download a release from https://github.com/mozilla/pdf.js/releases
-      (grab the pdfjs-<version>-dist.zip asset) and unzip its contents
-      into src/pdfjs/ so that src/pdfjs/web/viewer.html exists.
-      Because it's same-origin (served by Tauri/vite), main.js can reach
-      straight into its window object — no blob-URL / postMessage dance needed.
+    <div id="viewerScreen" class="hidden">
+      <div id="toolbar">
+        <button id="saveBtn" disabled>Save Now</button>
+        <span id="status">No file open</span>
+      </div>
 
-      `src` is intentionally left unset here — main.js seeds
-      localStorage["pdfjs.preferences"] with our viewer preferences
-      (highlight floating button, comments) and only then points this
-      iframe at viewer.html, so pdf.js's Preferences class (which reads
-      that key once during startup, before annotationEditorMode setup)
-      always sees them in time.
-    -->
-    <iframe id="viewerFrame"></iframe>
+      <!--
+        The pdf.js "generic" prebuilt viewer.
+        Download a release from https://github.com/mozilla/pdf.js/releases
+        (grab the pdfjs-<version>-dist.zip asset) and unzip its contents
+        into src/pdfjs/ so that src/pdfjs/web/viewer.html exists.
+        Because it's same-origin (served by Tauri/vite), main.js can reach
+        straight into its window object — no blob-URL / postMessage dance needed.
+
+        `src` is intentionally left unset here — main.js seeds
+        localStorage["pdfjs.preferences"] with our viewer preferences
+        (highlight floating button, comments) and only then points this
+        iframe at viewer.html, so pdf.js's Preferences class (which reads
+        that key once during startup, before annotationEditorMode setup)
+        always sees them in time. It stays display:none (via the hidden
+        viewerScreen wrapper) rather than unloaded while the landing
+        screen shows — main.js's init/hook wiring and last-file reopen
+        attempt still run in the background so the viewer's already warm
+        by the time a file is picked.
+      -->
+      <iframe id="viewerFrame"></iframe>
+    </div>
 
     <script type="module" src="./main.js"></script>
   </body>
