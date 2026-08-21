@@ -11,6 +11,33 @@ Runs on native Windows. Built and run interactively throughout
 development — this isn't a from-a-spec skeleton, the rough edges below
 are things that were actually hit and fixed.
 
+## Features
+
+- **Crash-safe autosave** — annotations are baked into the actual PDF
+  file on disk within seconds of the last edit (write-then-rename, so a
+  crash mid-write can't corrupt the file), not just held in memory until
+  a manual save.
+- **Full pdf.js annotation editors** — highlight, freetext, ink/drawing,
+  and comments, all pdf.js's own built-in tooling embedded directly.
+- **Status dot + activity log** — a small toolbar indicator shows
+  idle/dirty/saving/error/saved at a glance; clicking it opens a
+  timestamped log of every save/status event.
+- **Undo All** — reverts to the file's state at the start of the current
+  session (with a confirmation dialog), including an option to strip
+  every annotation in the file outright, not just the ones made this
+  session.
+- **Export Comments** — pulls every comment annotation out to a separate
+  file for sharing or review outside the PDF.
+- **Safe, real drag-and-drop and Ctrl+O** — both open a file through the
+  app's own path-tracking instead of pdf.js's built-in (and unsafe, in
+  this embedding) file-open handling.
+- **Overwrite vs. copy on open** — choose whether opening a PDF edits it
+  in place or works on an autosaved copy instead, per file, with the
+  choice remembered for next time.
+- **Recent files** on the landing screen, and a native window titlebar
+  that shows the PDF's own title metadata plus a `●` marker while there
+  are unsaved changes.
+
 ## Setup
 
 1. Install prerequisites: Node.js, Rust + cargo, [bun](https://bun.sh),
