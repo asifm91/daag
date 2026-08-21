@@ -29,6 +29,24 @@
       /* ---- Viewer screen: shown once a file is open ---- */
       #viewerScreen { height: 100%; }
       #viewerFrame { width: 100%; height: 100%; border: none; background: #525659; }
+
+      /* ---- Toast notifications: transient, for confirmations/errors ---- */
+      #toastContainer { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column-reverse; gap: 8px; z-index: 1000; pointer-events: none; }
+      .toast { background: #333; border: 1px solid #555; border-radius: 6px; padding: 10px 14px; font-size: 13px; color: #eee; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); max-width: 360px; pointer-events: auto; cursor: pointer; animation: toast-in 0.15s ease-out; }
+      .toast.error { border-color: #e06c6c; color: #ffc2c2; }
+      @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+      /* ---- Activity log: full history, opened from the toolbar dot ---- */
+      #logDialog { background: #262626; color: #eee; border: 1px solid #444; border-radius: 8px; padding: 0; width: min(560px, 90vw); }
+      #logDialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+      #logDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #3a3a3a; }
+      #logDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
+      #logDialogCloseButton { padding: 4px 10px; font-size: 13px; }
+      #logList { list-style: none; margin: 0; padding: 8px 16px; overflow-y: auto; max-height: min(60vh, 420px); font-size: 12px; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+      #logList li { padding: 4px 0; border-bottom: 1px solid #333; }
+      #logList li:last-child { border-bottom: none; }
+      #logList li.error { color: #ffb3b3; }
+      #logList .log-time { color: #888; margin-right: 8px; }
     </style>
   </head>
   <body>
@@ -63,14 +81,23 @@
         background so the viewer's already warm by the time a file is
         picked.
 
-        No outer toolbar/status bar any more — Open and Save both live as
-        buttons injected into pdf.js's own toolbar (see injectOpenButton/
-        injectSaveButton in main.js). Status/error feedback currently only
-        reaches the console (see the TEMPORARY note on setStatus() in
-        main.js) pending a real replacement UI.
+        No outer toolbar any more — Open and Save both live as buttons
+        injected into pdf.js's own toolbar (see injectOpenButton/
+        injectSaveButton in main.js), alongside a third injected button —
+        a small colored status dot — that opens #logDialog below.
       -->
       <iframe id="viewerFrame"></iframe>
     </div>
+
+    <div id="toastContainer"></div>
+
+    <dialog id="logDialog">
+      <div id="logDialogHeader">
+        <h2>Activity Log</h2>
+        <button id="logDialogCloseButton" type="button">Close</button>
+      </div>
+      <ul id="logList"></ul>
+    </dialog>
 
     <script type="module" src="./main.js"></script>
   </body>

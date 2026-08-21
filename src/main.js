@@ -12,36 +12,84 @@ const AUTOSAVE_DEBOUNCE_MS = 4000; // save 4s after the last edit
 const AUTOSAVE_MAX_WAIT_MS = 20000; // ...but never wait longer than this
 const RECENT_FILES_KEY = "pdfAnnotator.recentFiles";
 const MAX_RECENT_FILES = 8;
+const MAX_LOG_ENTRIES = 200;
 
 const landingScreen = document.getElementById("landingScreen");
 const viewerScreen = document.getElementById("viewerScreen");
 const openBtn = document.getElementById("openBtn");
 const landingStatusEl = document.getElementById("landingStatus");
 const recentFilesListEl = document.getElementById("recentFilesList");
+const toastContainerEl = document.getElementById("toastContainer");
+const logDialogEl = document.getElementById("logDialog");
+const logDialogCloseButtonEl = document.getElementById("logDialogCloseButton");
+const logListEl = document.getElementById("logList");
 const frame = document.getElementById("viewerFrame");
 
-// TEMPORARY: the outer toolbar (Save Now button + status text) has been
-// removed — the Save Now button was redundant with the toolbar-injected
-// Save button inside pdf.js's own UI (see injectSaveButton below), but
-// removing the status text leaves every call site below with nowhere to
-// show "Saving…"/"Saved"/dirty/error state while a document is open. This
-// just logs for now so nothing throws; see the conversation for a
-// shortlist of replacement UI patterns to pick from and wire in properly.
-function setStatus(text, kind = "") {
+// ---- Status reporting ----------------------------------------------------
+// Every status update — dirty/saving/saved/error, however minor — always
+// goes to the console and the activity log (appendLogEntry), so the full
+// history is there if you go looking (click the colored dot injected into
+// pdf.js's toolbar; see injectStatusButton below). `toast` is opt-in per
+// call site precisely because most of these fire far too often to pop up
+// a notification for each one — "Unsaved changes…" on literally every
+// edit — so it's reserved for things worth interrupting for: errors, and
+// (via saveNow's `force` flag) a confirmation when *you* clicked Save,
+// not for every unattended autosave tick.
+function setStatus(text, kind = "", { toast = false } = {}) {
   (kind === "error" ? console.error : console.log)(`[status] ${text}`);
+  appendLogEntry(text, kind);
+  updateStatusIndicator(kind);
+  if (toast) showToast(text, kind);
 }
 
 // Mirrors an error onto whichever screen is actually visible — openPath()
 // can fail while either one is showing (a stale recent-files entry is
 // clicked on the landing screen; a startup auto-reopen fails before the
 // viewer screen is ever shown). landingStatusEl only exists on the
-// landing screen, so a failure while actually viewing a document
-// currently only reaches the console via setStatus above.
+// landing screen; setStatus's toast covers the viewer-screen case.
 function reportError(message) {
-  setStatus(message, "error");
+  setStatus(message, "error", { toast: true });
   landingStatusEl.textContent = message;
   landingStatusEl.className = "error";
 }
+
+function showToast(message, kind) {
+  const toast = document.createElement("div");
+  toast.className = kind === "error" ? "toast error" : "toast";
+  toast.textContent = message;
+  toast.title = "Click to dismiss";
+  toast.addEventListener("click", () => toast.remove());
+  toastContainerEl.appendChild(toast);
+  setTimeout(() => toast.remove(), kind === "error" ? 6000 : 3500);
+}
+
+function appendLogEntry(text, kind) {
+  const li = document.createElement("li");
+  if (kind === "error") li.className = "error";
+  const time = document.createElement("span");
+  time.className = "log-time";
+  time.textContent = new Date().toLocaleTimeString();
+  li.append(time, text);
+  logListEl.appendChild(li);
+  while (logListEl.children.length > MAX_LOG_ENTRIES) {
+    logListEl.firstElementChild.remove();
+  }
+  if (logDialogEl.open) li.scrollIntoView({ block: "nearest" });
+}
+
+function openLogDialog() {
+  logDialogEl.showModal();
+  logListEl.lastElementChild?.scrollIntoView({ block: "nearest" });
+}
+
+logDialogCloseButtonEl.addEventListener("click", () => logDialogEl.close());
+// Native <dialog> already closes on Escape; this adds click-outside (the
+// backdrop is the dialog element itself — a click lands on it directly
+// only when it's *not* on the content inside, which stopPropagation-free
+// child elements would otherwise bubble past).
+logDialogEl.addEventListener("click", (event) => {
+  if (event.target === logDialogEl) logDialogEl.close();
+});
 
 function showViewer() {
   landingScreen.classList.add("hidden");
@@ -234,6 +282,45 @@ function injectOpenButton() {
   toolbarOpenButton = button;
 }
 
+// ---- Adding a status indicator to pdf.js's toolbar -----------------------
+// A small colored dot (idle/dirty/saving/saved/error — see custom-viewer
+// .css) reflecting the latest setStatus() call, doubling as the button
+// that opens the full activity log (openLogDialog, above). Injected the
+// same way and for the same reasons as injectSaveButton/injectOpenButton.
+let toolbarStatusButton = null;
+function injectStatusButton() {
+  if (toolbarStatusButton) return;
+  const doc = frame.contentDocument;
+  const downloadButton = doc.getElementById("downloadButton");
+  const group = downloadButton && downloadButton.closest(".toolbarHorizontalGroup");
+  if (!group) return;
+
+  ensureCustomStylesheetLoaded(doc);
+
+  const button = doc.createElement("button");
+  button.id = "customStatusButton";
+  button.className = "toolbarButton status-saved";
+  button.type = "button";
+  button.title = "View activity log";
+  button.addEventListener("click", openLogDialog);
+
+  const label = doc.createElement("span");
+  label.textContent = "Activity Log";
+  button.appendChild(label);
+
+  group.appendChild(button); // after Open, Save
+
+  toolbarStatusButton = button;
+}
+
+// setStatus's `kind` doubles as the indicator's visual state, except ""
+// (used for routine info like "Open: <path>" and "Saved <time>") maps to
+// the "saved" (green/idle-good) dot rather than getting its own class.
+function updateStatusIndicator(kind) {
+  if (!toolbarStatusButton) return;
+  toolbarStatusButton.className = `toolbarButton status-${kind || "saved"}`;
+}
+
 // ---- Blocking pdf.js's own internal "Open File" paths -------------------
 // pdf.js has three ways to open a *different* PDF that completely bypass
 // openPath()/pickAndOpenPdf() below: the "Open File…" entry in its overflow Tools menu
@@ -273,7 +360,7 @@ function blockInternalFileOpen(doc) {
     event.preventDefault();
     event.stopPropagation();
     if (event.type !== "dragover") {
-      setStatus("Use the Open button in the toolbar to open a file", "error");
+      setStatus("Use the Open button in the toolbar to open a file", "error", { toast: true });
     }
   };
   doc.addEventListener("dragover", block, { capture: true });
@@ -387,14 +474,24 @@ function hasPrivateUseAreaChar(text) {
   return false;
 }
 
+// currentTitleBase holds the document part of the title (filename, or the
+// PDF's own title once metadata resolves) separately from the "unsaved"
+// marker, so markDirty()/saveNow() can flip just the marker via
+// applyWindowTitleBar() without needing to know or re-derive the rest.
+let currentTitleBase = null;
+
+function applyWindowTitleBar() {
+  if (!currentTitleBase) return;
+  getCurrentWindow()
+    .setTitle(`${dirty ? "● " : ""}${currentTitleBase} — PDF Annotator`)
+    .catch((err) => console.error("Could not set window title:", err));
+}
+
 function updateWindowTitle(app, path) {
   const { pdfDocument } = app;
-  const setWindowTitle = (title) =>
-    getCurrentWindow()
-      .setTitle(`${title} — PDF Annotator`)
-      .catch((err) => console.error("Could not set window title:", err));
 
-  setWindowTitle(filenameFromPath(path));
+  currentTitleBase = filenameFromPath(path);
+  applyWindowTitleBar();
 
   pdfDocument
     ?.getMetadata()
@@ -403,7 +500,10 @@ function updateWindowTitle(app, path) {
       const xmpTitle = metadata?.get("dc:title");
       const pdfTitle =
         xmpTitle && xmpTitle !== "Untitled" && !hasPrivateUseAreaChar(xmpTitle) ? xmpTitle : info?.Title;
-      if (pdfTitle) setWindowTitle(pdfTitle);
+      if (pdfTitle) {
+        currentTitleBase = pdfTitle;
+        applyWindowTitleBar();
+      }
     })
     .catch((err) => console.error("Could not read PDF metadata for window title:", err));
 }
@@ -483,6 +583,7 @@ async function initializeViewer() {
   attachUndoRedoHook(app);
   injectSaveButton();
   injectOpenButton();
+  injectStatusButton();
   blockInternalFileOpen(frame.contentDocument);
 
   renderRecentFiles();
@@ -627,7 +728,7 @@ async function attachAnnotationHooks(app) {
   const { pdfDocument } = app;
   const storage = pdfDocument && pdfDocument.annotationStorage;
   if (!storage) {
-    setStatus("Warning: no annotationStorage found on this document", "error");
+    setStatus("Warning: no annotationStorage found on this document", "error", { toast: true });
     return;
   }
 
@@ -682,6 +783,7 @@ async function attachAnnotationHooks(app) {
 function markDirty() {
   if (suppressDirty) return;
   dirty = true;
+  applyWindowTitleBar();
   setStatus("Unsaved changes…", "dirty");
   scheduleAutosave();
 }
@@ -695,7 +797,11 @@ function scheduleAutosave() {
 // `force` bypasses the dirty check — used by the manual Save button, so
 // clicking it always does something observable (and re-saves rather than
 // silently no-op'ing) instead of only working when it happens to race
-// ahead of the autosave debounce.
+// ahead of the autosave debounce. Also gates the "Saved" toast: a manual
+// click gets a confirmation, an unattended autosave tick doesn't (it'd
+// fire on every debounce window, autosaving every few seconds while
+// actively editing — the toolbar status dot and activity log still see
+// every one, just without interrupting with a popup for each).
 async function saveNow({ force = false } = {}) {
   if (!currentPath || saveInFlight) return;
   if (!force && !dirty) return;
@@ -703,7 +809,7 @@ async function saveNow({ force = false } = {}) {
   if (!app || !app.pdfDocument) return;
 
   saveInFlight = true;
-  setStatus("Saving…", "dirty");
+  setStatus("Saving…", "saving");
 
   try {
     // pdfDocument.saveDocument() bakes the current annotationStorage
@@ -718,10 +824,11 @@ async function saveNow({ force = false } = {}) {
     await rename(tmpPath, currentPath);
 
     dirty = false;
-    setStatus(`Saved ${new Date().toLocaleTimeString()}`);
+    applyWindowTitleBar();
+    setStatus(`${force ? "Saved" : "Autosaved"} ${new Date().toLocaleTimeString()}`, "", { toast: force });
   } catch (err) {
     console.error("Autosave failed:", err);
-    setStatus("Autosave failed — see console", "error");
+    setStatus("Autosave failed — see console", "error", { toast: true });
     // Keep `dirty` true so the next edit or manual Save retries.
   } finally {
     saveInFlight = false;

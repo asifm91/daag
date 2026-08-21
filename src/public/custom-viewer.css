@@ -61,3 +61,23 @@
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M1 5V14H15V6H7L6 4H1Z'/%3E%3C/svg%3E");
           mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M1 5V14H15V6H7L6 4H1Z'/%3E%3C/svg%3E");
 }
+
+/* ---- Status indicator / activity-log opener --------------------------
+ * A small colored dot rather than a monochrome mask-image icon like the
+ * two above, so it overrides .toolbarButton::before's mask entirely
+ * (mask-image: none) and just paints background-color directly — the
+ * dot's color comes from --status-color, set per state class below via
+ * setStatus()/updateStatusIndicator() in main.js. */
+#customStatusButton::before {
+  -webkit-mask-image: none;
+          mask-image: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background-color: var(--status-color, #888);
+}
+
+#customStatusButton.status-dirty { --status-color: #e0c46c; }
+#customStatusButton.status-saving { --status-color: #6ca0e0; }
+#customStatusButton.status-error { --status-color: #e06c6c; }
+#customStatusButton.status-saved { --status-color: #6ce0a0; }
