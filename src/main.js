@@ -1,8 +1,9 @@
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { readFile, writeFile, rename, exists } from "@tauri-apps/plugin-fs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { invoke } from "@tauri-apps/api/core";
+import { dirname, basename, join } from "@tauri-apps/api/path";
 
 // ---- State -----------------------------------------------------------
 let currentPath = null; // absolute path of the PDF currently open
@@ -24,6 +25,8 @@ const RECENT_FILES_KEY = "pdfAnnotator.recentFiles";
 const MAX_RECENT_FILES = 8;
 const MAX_LOG_ENTRIES = 200;
 const COMMENTER_NAME_KEY = "pdfAnnotator.commenterName";
+const OPEN_MODE_KEY = "pdfAnnotator.openMode"; // "overwrite" | "ask" | "copy"
+const COPY_MAPPINGS_KEY = "pdfAnnotator.copyMappings";
 
 const landingScreen = document.getElementById("landingScreen");
 const viewerScreen = document.getElementById("viewerScreen");
@@ -40,11 +43,19 @@ const settingsDialogCloseButtonEl = document.getElementById("settingsDialogClose
 const settingsDialogCancelButtonEl = document.getElementById("settingsDialogCancelButton");
 const settingsDialogSaveButtonEl = document.getElementById("settingsDialogSaveButton");
 const commenterNameInputEl = document.getElementById("commenterNameInput");
+const openModeSelectEl = document.getElementById("openModeSelect");
 const undoAllDialogEl = document.getElementById("undoAllDialog");
 const undoAllDialogCloseButtonEl = document.getElementById("undoAllDialogCloseButton");
 const undoAllDialogCancelButtonEl = document.getElementById("undoAllDialogCancelButton");
 const undoAllDialogConfirmButtonEl = document.getElementById("undoAllDialogConfirmButton");
 const undoAllStripAllCheckboxEl = document.getElementById("undoAllStripAllCheckbox");
+const overwriteCopyDialogEl = document.getElementById("overwriteCopyDialog");
+const overwriteCopyDialogCloseButtonEl = document.getElementById("overwriteCopyDialogCloseButton");
+const overwriteCopyDialogCancelButtonEl = document.getElementById("overwriteCopyDialogCancelButton");
+const overwriteCopyDialogOverwriteButtonEl = document.getElementById("overwriteCopyDialogOverwriteButton");
+const overwriteCopyDialogCopyButtonEl = document.getElementById("overwriteCopyDialogCopyButton");
+const overwriteCopyDialogRememberCheckboxEl = document.getElementById("overwriteCopyDialogRememberCheckbox");
+const overwriteCopyDialogPathEl = document.getElementById("overwriteCopyDialogPath");
 
 // ---- Status reporting ----------------------------------------------------
 // Every status update — dirty/saving/saved/error, however minor — always
@@ -139,14 +150,71 @@ async function seedDefaultCommenterName() {
   }
 }
 
+// ---- Global "open mode" setting + per-file copy-destination memory -------
+// Governs what happens when a PDF is opened: overwrite it in place (today's
+// only behavior, and still the default here), always ask, or always create
+// a copy and work in that instead — see resolveOpenTarget() below for how
+// this is actually applied. Same localStorage-backed getter/setter shape as
+// the commenter-name setting above.
+function getOpenMode() {
+  const mode = localStorage.getItem(OPEN_MODE_KEY);
+  return mode === "ask" || mode === "copy" ? mode : "overwrite";
+}
+
+function setOpenMode(mode) {
+  localStorage.setItem(OPEN_MODE_KEY, mode);
+}
+
+// Per-original-file memory of what was decided, so reopening the same file
+// doesn't re-ask or re-copy — { [originalAbsolutePath]: {mode:"overwrite"}
+// | {mode:"copy", copyPath} }. Not capped like recent-files; this is small
+// per-file metadata that should persist as long as the mapping is valid.
+function getCopyMappings() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(COPY_MAPPINGS_KEY));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function getCopyMapping(originalPath) {
+  return getCopyMappings()[originalPath] || null;
+}
+
+function setCopyMapping(originalPath, entry) {
+  const mappings = getCopyMappings();
+  mappings[originalPath] = entry;
+  localStorage.setItem(COPY_MAPPINGS_KEY, JSON.stringify(mappings));
+}
+
+function clearCopyMapping(originalPath) {
+  const mappings = getCopyMappings();
+  if (!(originalPath in mappings)) return;
+  delete mappings[originalPath];
+  localStorage.setItem(COPY_MAPPINGS_KEY, JSON.stringify(mappings));
+}
+
+// Is `path` itself a copy this app previously created for some other
+// original? If so it must be opened like a plain "overwrite" file — never
+// re-prompted or copied again — otherwise opening a copy from its own
+// Recent Files entry would create a copy-of-the-copy (mode "copy") or
+// re-prompt forever (mode "ask"). Scans values rather than keeping a
+// second reverse index; copyMappings is small, read only at open time.
+function isKnownCopyPath(path) {
+  return Object.values(getCopyMappings()).some((entry) => entry.mode === "copy" && entry.copyPath === path);
+}
+
 function openSettingsDialog() {
   commenterNameInputEl.value = getCommenterName();
+  openModeSelectEl.value = getOpenMode();
   settingsDialogEl.showModal();
   commenterNameInputEl.focus();
 }
 
 settingsDialogSaveButtonEl.addEventListener("click", () => {
   setCommenterName(commenterNameInputEl.value.trim());
+  setOpenMode(openModeSelectEl.value);
   settingsDialogEl.close();
 });
 settingsDialogCancelButtonEl.addEventListener("click", () => settingsDialogEl.close());
@@ -187,6 +255,60 @@ undoAllDialogCloseButtonEl.addEventListener("click", () => undoAllDialogEl.close
 undoAllDialogEl.addEventListener("click", (event) => {
   if (event.target === undoAllDialogEl) undoAllDialogEl.close();
 });
+
+// ---- Overwrite-or-copy prompt dialog --------------------------------------
+// Shown by resolveOpenTarget() (below) when the global open-mode setting is
+// "ask" and a given original file has no remembered decision yet. Unlike
+// the fire-and-forget dialogs above, openPath() needs to *await* the
+// user's choice — including, for "Create a Copy…", a chained native Save
+// dialog — before it knows what to actually load. The dialog element is
+// created once and its listeners wired once, so every call routes through
+// one module-level "settle" slot: whichever of a button click / Escape
+// (fires "cancel") / any other close fires first clears the slot and wins,
+// and every other listener's `settle?.(...)` becomes a guaranteed no-op —
+// no per-call listener add/remove, no risk of double-resolving.
+let settleOverwriteCopyPrompt = null;
+
+function resolveOverwriteCopyPrompt(result) {
+  const settle = settleOverwriteCopyPrompt;
+  settleOverwriteCopyPrompt = null; // clear BEFORE close() so the "close" listener below is a no-op
+  overwriteCopyDialogEl.close();
+  settle?.(result);
+}
+
+overwriteCopyDialogOverwriteButtonEl.addEventListener("click", () =>
+  resolveOverwriteCopyPrompt({ action: "overwrite", remember: overwriteCopyDialogRememberCheckboxEl.checked })
+);
+overwriteCopyDialogCopyButtonEl.addEventListener("click", () =>
+  resolveOverwriteCopyPrompt({ action: "copy", remember: overwriteCopyDialogRememberCheckboxEl.checked })
+);
+overwriteCopyDialogCancelButtonEl.addEventListener("click", () => resolveOverwriteCopyPrompt(null));
+overwriteCopyDialogCloseButtonEl.addEventListener("click", () => resolveOverwriteCopyPrompt(null));
+overwriteCopyDialogEl.addEventListener("click", (event) => {
+  if (event.target === overwriteCopyDialogEl) resolveOverwriteCopyPrompt(null);
+});
+// Escape fires "cancel" then "close" without going through any button
+// handler above — must be caught separately or the promise never settles.
+overwriteCopyDialogEl.addEventListener("cancel", () => resolveOverwriteCopyPrompt(null));
+// Belt-and-suspenders: however else the dialog ends up closed, still
+// settle instead of leaking the promise pending forever.
+overwriteCopyDialogEl.addEventListener("close", () => {
+  const settle = settleOverwriteCopyPrompt;
+  settleOverwriteCopyPrompt = null;
+  settle?.(null);
+});
+
+// Not safe to call while a previous call's dialog is still open (showModal()
+// throws on an already-open <dialog>) — openPath's single-flight queue (see
+// openInFlight below) guarantees at most one caller is ever pending.
+function promptOverwriteOrCopy(originalPath) {
+  return new Promise((resolve) => {
+    settleOverwriteCopyPrompt = resolve;
+    overwriteCopyDialogRememberCheckboxEl.checked = true; // always defaults checked
+    overwriteCopyDialogPathEl.textContent = originalPath;
+    overwriteCopyDialogEl.showModal();
+  });
+}
 
 function showViewer() {
   landingScreen.classList.add("hidden");
@@ -867,31 +989,146 @@ async function loadPdfIntoViewer(app, path, bytes) {
   attachAnnotationHooks(app);
 }
 
+// ---- Deciding where a PDF is actually read from / saved back to ----------
+// Thrown only when a file we expected to exist (the requested path, or a
+// remembered copy) has actually gone missing — as opposed to some other
+// failure (disk full/permission denied writing a new copy, a native Save
+// dialog erroring) that has nothing to do with the requested path and must
+// NOT prune it from Recent Files or claim it "moved or was deleted".
+class FileMissingError extends Error {}
+
+async function readIfExists(path) {
+  if (!(await exists(path))) throw new FileMissingError("file no longer exists");
+  return readFile(path);
+}
+
+// Suggests "<original's folder>/<name> (copy).pdf" as the native Save
+// dialog's starting point — never used silently (the destination is always
+// picked via an explicit native dialog, per design), just saves retyping
+// the original's own folder/name in the common case.
+async function computeDefaultCopyPath(originalPath) {
+  const dir = await dirname(originalPath);
+  const base = await basename(originalPath, ".pdf"); // strips a trailing ".pdf" if present
+  return join(dir, `${base} (copy).pdf`);
+}
+
+// Shared by both places a copy destination needs choosing: the "Create a
+// Copy…" button in the ask-dialog, and the immediate native-only path taken
+// when the global open mode is "copy". Never touches copyMappings itself —
+// callers decide whether/how to remember the choice. Returns the chosen
+// path, or null if the native dialog was cancelled.
+async function createCopyOfOriginal(originalPath, bytes) {
+  const defaultPath = await computeDefaultCopyPath(originalPath);
+  const copyPath = await save({
+    title: "Save Copy As",
+    defaultPath,
+    filters: [{ name: "PDF", extensions: ["pdf"] }],
+  });
+  if (!copyPath) return null;
+  await writeFile(copyPath, bytes);
+  return copyPath;
+}
+
+// The overwrite-vs-copy policy itself. Every real entry point funnels
+// through openPath() (below), so this is the one place it needs to live.
+// Returns { targetPath, bytes } (bytes already read — callers never need a
+// second readFile), or null if the user cancelled somewhere (the custom
+// dialog, or a native Save dialog), which openPath treats as a silent
+// no-op — no error, nothing opens.
+async function resolveOpenTarget(originalPath) {
+  // Opening a copy this app already created for some other original,
+  // directly (e.g. its own Recent Files entry) — treat exactly like an
+  // unmapped file under "overwrite": just open it, never copy it again.
+  if (isKnownCopyPath(originalPath)) {
+    return { targetPath: originalPath, bytes: await readIfExists(originalPath) };
+  }
+
+  const mapping = getCopyMapping(originalPath);
+  if (mapping?.mode === "overwrite") {
+    return { targetPath: originalPath, bytes: await readIfExists(originalPath) };
+  }
+  if (mapping?.mode === "copy") {
+    if (await exists(mapping.copyPath)) {
+      return { targetPath: mapping.copyPath, bytes: await readFile(mapping.copyPath) };
+    }
+    // The remembered copy was moved/deleted since — don't silently fall
+    // back to clobbering the original; forget the stale mapping and
+    // re-decide from scratch below, same as a file never opened before.
+    clearCopyMapping(originalPath);
+  }
+
+  const bytes = await readIfExists(originalPath);
+  const openMode = getOpenMode();
+
+  if (openMode === "overwrite") {
+    return { targetPath: originalPath, bytes };
+  }
+  if (openMode === "copy") {
+    const copyPath = await createCopyOfOriginal(originalPath, bytes);
+    if (!copyPath) return null;
+    setCopyMapping(originalPath, { mode: "copy", copyPath });
+    return { targetPath: copyPath, bytes };
+  }
+
+  // openMode === "ask"
+  const decision = await promptOverwriteOrCopy(originalPath);
+  if (!decision) return null;
+  if (decision.action === "overwrite") {
+    if (decision.remember) setCopyMapping(originalPath, { mode: "overwrite" });
+    return { targetPath: originalPath, bytes };
+  }
+  const copyPath = await createCopyOfOriginal(originalPath, bytes);
+  if (!copyPath) return null; // native dialog cancelled — abort the whole open, don't re-show the ask-dialog
+  if (decision.remember) setCopyMapping(originalPath, { mode: "copy", copyPath });
+  return { targetPath: copyPath, bytes };
+}
+
 // ---- Opening a file by path, with graceful failure -----------------------
 // The one thing every entry point funnels through once a *path* is known
 // (as opposed to pickAndOpenPdf() below, which is how a path is chosen in
-// the first place). Checks the file still exists before trying to read
-// it — covers a recent-files entry whose file has since been moved or
-// deleted, and the startup auto-reopen of the most recent one — and on
-// any failure, prunes that entry so it doesn't keep showing a dead link,
-// then reports the error onto whichever screen is actually visible.
+// the first place). resolveOpenTarget() applies the overwrite/copy policy
+// and reports whether the file (or a copy of it) still exists; on any
+// other failure while opening, prunes that entry so it doesn't keep
+// showing a dead link, then reports the error onto whichever screen is
+// actually visible.
+//
+// Serialized via openInFlight so at most one open — and at most one
+// custom/native dialog from within resolveOpenTarget — is ever in flight
+// at a time; promptOverwriteOrCopy's <dialog> is reused across calls and
+// would throw if showModal() were called on it while already open (e.g.
+// two rapid Recent Files clicks).
+let openInFlight = Promise.resolve();
 async function openPath(path) {
+  const previous = openInFlight;
+  let release;
+  openInFlight = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previous;
   try {
-    if (!(await exists(path))) {
-      throw new Error("file no longer exists");
-    }
-    const bytes = await readFile(path);
+    const resolved = await resolveOpenTarget(path);
+    if (!resolved) return; // cancelled somewhere; no error, no toast
+    const { targetPath, bytes } = resolved;
     const app = await waitForViewer();
     // Snapshot before handing bytes off to app.open() — pdf.js may transfer
     // the underlying buffer to its worker, which would detach it.
     sessionOriginalBytes = bytes.slice();
-    await loadPdfIntoViewer(app, path, bytes);
+    // Now redirected to a copy — drop the stale original-path entry so it
+    // doesn't keep sitting in Recent Files alongside the copy's own entry.
+    if (targetPath !== path) removeFromRecentFiles(path);
+    await loadPdfIntoViewer(app, targetPath, bytes);
     showViewer();
   } catch (err) {
     console.error("Could not open PDF:", err);
-    removeFromRecentFiles(path);
-    renderRecentFiles();
-    reportError(`Could not open ${filenameFromPath(path)} — it may have moved or been deleted`);
+    if (err instanceof FileMissingError) {
+      removeFromRecentFiles(path);
+      renderRecentFiles();
+      reportError(`Could not open ${filenameFromPath(path)} — it may have moved or been deleted`);
+    } else {
+      reportError(`Could not open ${filenameFromPath(path)} — see console`);
+    }
+  } finally {
+    release();
   }
 }
 

@@ -59,9 +59,22 @@
       #settingsDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
       #settingsDialogBody { padding: 16px; }
       #settingsDialogBody label { display: block; font-size: 12px; color: #aaa; margin-bottom: 6px; }
-      #commenterNameInput { width: 100%; box-sizing: border-box; background: #1c1c1c; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 7px 9px; font-size: 13px; }
+      #settingsDialogBody label:not(:first-child) { margin-top: 14px; }
+      #commenterNameInput, #openModeSelect { width: 100%; box-sizing: border-box; background: #1c1c1c; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 7px 9px; font-size: 13px; }
       #settingsDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid #3a3a3a; }
       #settingsDialogFooter button { padding: 6px 14px; font-size: 13px; }
+
+      /* ---- Overwrite-or-copy prompt: shown on open when Settings is set to "Ask each time" ---- */
+      #overwriteCopyDialog { background: #262626; color: #eee; border: 1px solid #444; border-radius: 8px; padding: 0; width: min(460px, 90vw); }
+      #overwriteCopyDialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+      #overwriteCopyDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #3a3a3a; }
+      #overwriteCopyDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
+      #overwriteCopyDialogBody { padding: 16px; font-size: 13px; color: #ccc; line-height: 1.5; }
+      #overwriteCopyDialogPath { font-size: 12px; color: #888; word-break: break-all; margin: 8px 0 0; }
+      #overwriteCopyDialogRememberLabel { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; cursor: pointer; }
+      #overwriteCopyDialogRememberLabel input { margin-top: 2px; accent-color: #888; }
+      #overwriteCopyDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid #3a3a3a; flex-wrap: wrap; }
+      #overwriteCopyDialogFooter button { padding: 6px 14px; font-size: 13px; }
 
       /* ---- Undo All confirmation: destructive, so a confirm step gates it ---- */
       #undoAllDialog { background: #262626; color: #eee; border: 1px solid #444; border-radius: 8px; padding: 0; width: min(400px, 90vw); }
@@ -135,6 +148,13 @@
       <div id="settingsDialogBody">
         <label for="commenterNameInput">Commenter name</label>
         <input id="commenterNameInput" type="text" autocomplete="off" placeholder="Your name" />
+
+        <label for="openModeSelect">When opening a PDF</label>
+        <select id="openModeSelect">
+          <option value="overwrite">Always overwrite the original file</option>
+          <option value="ask">Ask each time</option>
+          <option value="copy">Always create a copy</option>
+        </select>
       </div>
       <div id="settingsDialogFooter">
         <button id="settingsDialogCancelButton" type="button">Cancel</button>
@@ -161,6 +181,30 @@
       <div id="undoAllDialogFooter">
         <button id="undoAllDialogCancelButton" type="button">Cancel</button>
         <button id="undoAllDialogConfirmButton" type="button">Undo All</button>
+      </div>
+    </dialog>
+
+    <dialog id="overwriteCopyDialog">
+      <div id="overwriteCopyDialogHeader">
+        <h2>Overwrite Original or Create a Copy?</h2>
+        <button id="overwriteCopyDialogCloseButton" type="button">Close</button>
+      </div>
+      <div id="overwriteCopyDialogBody">
+        <p>
+          Settings is set to ask each time a PDF is opened. Annotations can
+          be saved directly into the original file, or into a separate copy
+          instead — the original will not be touched.
+        </p>
+        <p id="overwriteCopyDialogPath"></p>
+        <label id="overwriteCopyDialogRememberLabel">
+          <input id="overwriteCopyDialogRememberCheckbox" type="checkbox" checked />
+          Remember this choice for this file
+        </label>
+      </div>
+      <div id="overwriteCopyDialogFooter">
+        <button id="overwriteCopyDialogCancelButton" type="button">Cancel</button>
+        <button id="overwriteCopyDialogOverwriteButton" type="button">Overwrite Original</button>
+        <button id="overwriteCopyDialogCopyButton" type="button">Create a Copy…</button>
       </div>
     </dialog>
 
