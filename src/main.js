@@ -9,6 +9,14 @@ let currentPath = null; // absolute path of the PDF currently open
 let dirty = false; // true if there are unsaved annotation changes
 let saveInFlight = false;
 let autosaveTimer = null;
+// Pristine bytes of currentPath as of the moment it was opened THIS
+// session — i.e. before any edit made through this app touched it. Powers
+// "Undo All" (see revertToSessionStart below): reverting doesn't walk
+// pdf.js's undo stack (which has its own documented gaps — see
+// attachUndoRedoHook), it just reloads the document from this snapshot,
+// which uniformly undoes every kind of edit at once, including ones
+// already autosaved to disk this session.
+let sessionOriginalBytes = null;
 
 const AUTOSAVE_DEBOUNCE_MS = 4000; // save 4s after the last edit
 const AUTOSAVE_MAX_WAIT_MS = 20000; // ...but never wait longer than this
@@ -32,6 +40,10 @@ const settingsDialogCloseButtonEl = document.getElementById("settingsDialogClose
 const settingsDialogCancelButtonEl = document.getElementById("settingsDialogCancelButton");
 const settingsDialogSaveButtonEl = document.getElementById("settingsDialogSaveButton");
 const commenterNameInputEl = document.getElementById("commenterNameInput");
+const undoAllDialogEl = document.getElementById("undoAllDialog");
+const undoAllDialogCloseButtonEl = document.getElementById("undoAllDialogCloseButton");
+const undoAllDialogCancelButtonEl = document.getElementById("undoAllDialogCancelButton");
+const undoAllDialogConfirmButtonEl = document.getElementById("undoAllDialogConfirmButton");
 
 // ---- Status reporting ----------------------------------------------------
 // Every status update — dirty/saving/saved/error, however minor — always
@@ -143,6 +155,24 @@ settingsDialogEl.addEventListener("click", (event) => {
 });
 commenterNameInputEl.addEventListener("keydown", (event) => {
   if (event.key === "Enter") settingsDialogSaveButtonEl.click();
+});
+
+// ---- Undo All confirmation dialog ----------------------------------------
+function openUndoAllDialog() {
+  undoAllDialogEl.showModal();
+}
+
+undoAllDialogConfirmButtonEl.addEventListener("click", () => {
+  undoAllDialogEl.close();
+  revertToSessionStart().catch((err) => {
+    console.error("Undo All failed:", err);
+    reportError("Undo All failed — see console");
+  });
+});
+undoAllDialogCancelButtonEl.addEventListener("click", () => undoAllDialogEl.close());
+undoAllDialogCloseButtonEl.addEventListener("click", () => undoAllDialogEl.close());
+undoAllDialogEl.addEventListener("click", (event) => {
+  if (event.target === undoAllDialogEl) undoAllDialogEl.close();
 });
 
 function showViewer() {
@@ -404,6 +434,39 @@ function injectSettingsButton() {
   group.appendChild(button); // after Open, Save, Activity Log
 
   toolbarSettingsButton = button;
+}
+
+// ---- Adding an "Undo All" button to pdf.js's toolbar ---------------------
+// Reverts to the exact bytes the current file had when it was opened this
+// session and immediately saves that reverted state to disk — see
+// revertToSessionStart below. Disabled until a file is open, same as Save.
+// Injected the same way and for the same reasons as the other toolbar
+// buttons.
+let toolbarUndoAllButton = null;
+function injectUndoAllButton() {
+  if (toolbarUndoAllButton) return;
+  const doc = frame.contentDocument;
+  const downloadButton = doc.getElementById("downloadButton");
+  const group = downloadButton && downloadButton.closest(".toolbarHorizontalGroup");
+  if (!group) return;
+
+  ensureCustomStylesheetLoaded(doc);
+
+  const button = doc.createElement("button");
+  button.id = "customUndoAllButton";
+  button.className = "toolbarButton";
+  button.type = "button";
+  button.title = "Remove all annotations added or changed since this file was opened";
+  button.disabled = true;
+  button.addEventListener("click", openUndoAllDialog);
+
+  const label = doc.createElement("span");
+  label.textContent = "Undo All";
+  button.appendChild(label);
+
+  group.appendChild(button); // after Open, Save, Activity Log, Settings
+
+  toolbarUndoAllButton = button;
 }
 
 // ---- Blocking pdf.js's own internal "Open File" paths -------------------
@@ -782,6 +845,7 @@ async function loadPdfIntoViewer(app, path, bytes) {
   currentPath = path;
   dirty = false;
   if (toolbarSaveButton) toolbarSaveButton.disabled = false;
+  if (toolbarUndoAllButton) toolbarUndoAllButton.disabled = false;
   setStatus(`Open: ${path}`);
   addToRecentFiles(path);
   renderRecentFiles();
@@ -805,6 +869,9 @@ async function openPath(path) {
     }
     const bytes = await readFile(path);
     const app = await waitForViewer();
+    // Snapshot before handing bytes off to app.open() — pdf.js may transfer
+    // the underlying buffer to its worker, which would detach it.
+    sessionOriginalBytes = bytes.slice();
     await loadPdfIntoViewer(app, path, bytes);
     showViewer();
   } catch (err) {
@@ -886,6 +953,7 @@ async function initializeViewer() {
   injectOpenButton();
   injectStatusButton();
   injectSettingsButton();
+  injectUndoAllButton();
   blockInternalFileOpen(frame.contentDocument);
   attachKeyboardShortcuts(frame.contentDocument);
   attachDragDropOpen();
@@ -1205,6 +1273,35 @@ async function saveNow({ force = false } = {}) {
   } finally {
     saveInFlight = false;
   }
+}
+
+// ---- "Undo All": reverting to the file's state at session start --------
+// Deliberately does NOT walk pdf.js's undo stack (CommandManager.undo(),
+// see attachUndoRedoHook) — that only covers edits made through
+// addCommands, and even that path needed real patching to autosave
+// correctly (recolor/resize/move, comment edits/deletions, and whole-
+// annotation removal all have their own gaps — see Known rough edges in
+// CLAUDE.md). Reverting to the exact bytes read from disk when this file
+// was opened this session (sessionOriginalBytes, captured in openPath)
+// sidesteps all of that: it's the same "reopen the document" path as any
+// other open, so it uniformly undoes every kind of edit at once,
+// regardless of what pdf.js call path produced it.
+//
+// Force-saves immediately afterward rather than just marking dirty and
+// letting the normal debounce handle it — this app's whole premise is
+// that the file on disk should never lag behind what's on screen for
+// longer than necessary, and if autosave already wrote this session's
+// annotations to disk before Undo All was clicked, leaving the reverted
+// state unsaved would mean a crash right after clicking it loses nothing
+// visible but silently leaves the old annotations sitting in the file.
+async function revertToSessionStart() {
+  if (!currentPath || !sessionOriginalBytes) return;
+  const app = getViewerApp();
+  if (!app) return;
+
+  await loadPdfIntoViewer(app, currentPath, sessionOriginalBytes.slice());
+  setStatus("Undo All: removed all annotations made this session", "", { toast: true });
+  await saveNow({ force: true });
 }
 
 // Safety net: even mid-typing, don't let unsaved changes sit forever.

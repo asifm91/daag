@@ -62,6 +62,17 @@
       #commenterNameInput { width: 100%; box-sizing: border-box; background: #1c1c1c; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 7px 9px; font-size: 13px; }
       #settingsDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid #3a3a3a; }
       #settingsDialogFooter button { padding: 6px 14px; font-size: 13px; }
+
+      /* ---- Undo All confirmation: destructive, so a confirm step gates it ---- */
+      #undoAllDialog { background: #262626; color: #eee; border: 1px solid #444; border-radius: 8px; padding: 0; width: min(400px, 90vw); }
+      #undoAllDialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+      #undoAllDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #3a3a3a; }
+      #undoAllDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
+      #undoAllDialogBody { padding: 16px; font-size: 13px; color: #ccc; line-height: 1.5; }
+      #undoAllDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid #3a3a3a; }
+      #undoAllDialogFooter button { padding: 6px 14px; font-size: 13px; }
+      #undoAllDialogConfirmButton { background: #6b2b2b; border-color: #a33d3d; }
+      #undoAllDialogConfirmButton:hover { background: #7e3232; }
     </style>
   </head>
   <body>
@@ -126,6 +137,23 @@
       <div id="settingsDialogFooter">
         <button id="settingsDialogCancelButton" type="button">Cancel</button>
         <button id="settingsDialogSaveButton" type="button">Save</button>
+      </div>
+    </dialog>
+
+    <dialog id="undoAllDialog">
+      <div id="undoAllDialogHeader">
+        <h2>Undo All?</h2>
+        <button id="undoAllDialogCloseButton" type="button">Close</button>
+      </div>
+      <div id="undoAllDialogBody">
+        <p>
+          This removes every annotation added or changed since this file was
+          opened, and saves the file immediately. It cannot be undone.
+        </p>
+      </div>
+      <div id="undoAllDialogFooter">
+        <button id="undoAllDialogCancelButton" type="button">Cancel</button>
+        <button id="undoAllDialogConfirmButton" type="button">Undo All</button>
       </div>
     </dialog>
 

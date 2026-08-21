@@ -51,8 +51,11 @@ patch):
 - **Status dot** (`injectStatusButton`) — small colored dot
   (idle/dirty/saving/error/saved) that opens a full activity-log
   `<dialog>` on click.
+- **Undo All** (`injectUndoAllButton`) — reverts to the file's state at
+  session start; see Undo All flow below. Has no broken pdf.js
+  counterpart to hide, it's purely additive.
 
-All three share one externally-loaded stylesheet
+All four share one externally-loaded stylesheet
 (`ensureCustomStylesheetLoaded` → `public/custom-viewer.css`) — **must**
 be a real `<link>`, not a JS-inserted `<style>` tag; see Known rough
 edges for why.
@@ -98,6 +101,35 @@ Once *something* is actually dirty: 4s idle debounce / 20s hard ceiling →
 `pdfDocument.saveDocument()` bakes annotations into fresh PDF bytes →
 written to `<file>.autosave.tmp` → renamed over the original (so a crash
 mid-write can't corrupt the file).
+
+### Undo All flow
+`revertToSessionStart()`, behind the toolbar's "Undo All" button (gated on
+a confirmation `<dialog>` — it's destructive and writes to disk right
+away). Deliberately does **not** walk pdf.js's undo stack
+(`AnnotationEditorUIManager.undo()`/its `CommandManager`) — that only
+covers edits made through `addCommands`, and even that path needed real
+patching to autosave correctly at all (see Autosave flow above: recolor/
+resize/move, comment edits/deletions, and whole-annotation removal each
+have their own gaps). Instead:
+- `openPath()` snapshots the file's pristine bytes into
+  `sessionOriginalBytes` (a `.slice()` copy — `app.open()` may transfer
+  the original buffer to pdf.js's worker, which would detach it) before
+  ever handing them to pdf.js.
+- Undo All reloads the document from that snapshot via the same
+  `loadPdfIntoViewer()` path any other open uses — this is what makes it
+  uniform across every kind of edit regardless of what pdf.js call path
+  produced it, rather than needing its own patch per edit type the way
+  autosave's dirty-tracking does.
+- Then force-saves immediately (`saveNow({ force: true })`) rather than
+  just marking dirty and letting the normal debounce handle it — if
+  autosave had already written this session's annotations to disk before
+  Undo All was clicked, leaving the revert unsaved would mean a crash
+  right after clicking it silently leaves the old annotations in the
+  file despite the UI showing them gone.
+
+"Session" here means since *this file* was opened this time, not since
+the app launched — closing and reopening the same file resets the
+snapshot to whatever's on disk at that point.
 
 ### Rust side
 Intentionally thin — just wires up the `dialog`, `fs`, and (for the
