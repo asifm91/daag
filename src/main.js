@@ -511,27 +511,32 @@ function addShortcutHints(doc) {
 }
 
 // ---- Recent-files list ---------------------------------------------------
-// Persisted as a plain array of paths, most-recent-first, in localStorage
-// (outer page's storage, unrelated to the iframe's own pdfjs.preferences
-// key above). The first entry doubles as "the last-opened file" for the
-// startup auto-reopen in initializeViewer() below — no separate key to
-// keep in sync.
+// Persisted as an array of {path, lastOpened} objects, most-recent-first,
+// in localStorage (outer page's storage, unrelated to the iframe's own
+// pdfjs.preferences key above). getRecentFiles() also accepts the older
+// plain-string-array format (pre-dating lastOpened) still sitting in an
+// existing user's localStorage, normalizing each bare string into
+// {path, lastOpened: null}.
 function getRecentFiles() {
   try {
     const parsed = JSON.parse(localStorage.getItem(RECENT_FILES_KEY));
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((entry) => (typeof entry === "string" ? { path: entry, lastOpened: null } : entry));
   } catch {
     return [];
   }
 }
 
 function addToRecentFiles(path) {
-  const files = [path, ...getRecentFiles().filter((p) => p !== path)].slice(0, MAX_RECENT_FILES);
+  const files = [{ path, lastOpened: Date.now() }, ...getRecentFiles().filter((f) => f.path !== path)].slice(
+    0,
+    MAX_RECENT_FILES
+  );
   localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(files));
 }
 
 function removeFromRecentFiles(path) {
-  localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(getRecentFiles().filter((p) => p !== path)));
+  localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(getRecentFiles().filter((f) => f.path !== path)));
 }
 
 function filenameFromPath(path) {
@@ -550,12 +555,33 @@ function renderRecentFiles() {
     return;
   }
 
-  for (const path of files) {
+  for (const { path, lastOpened } of files) {
     const li = document.createElement("li");
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = filenameFromPath(path);
     button.title = path;
+
+    const row = document.createElement("div");
+    row.className = "recentFileRow";
+
+    const name = document.createElement("span");
+    name.className = "recentFileName";
+    name.textContent = filenameFromPath(path);
+    row.appendChild(name);
+
+    if (lastOpened) {
+      const meta = document.createElement("span");
+      meta.className = "recentFileMeta";
+      meta.textContent = new Date(lastOpened).toLocaleString();
+      row.appendChild(meta);
+    }
+    button.appendChild(row);
+
+    const pathEl = document.createElement("span");
+    pathEl.className = "recentFilePath";
+    pathEl.textContent = path;
+    button.appendChild(pathEl);
+
     button.addEventListener("click", () => {
       openPath(path).catch((err) => {
         console.error(err);

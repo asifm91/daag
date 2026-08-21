@@ -22,6 +22,10 @@
       #recentFilesList li:last-child { border-bottom: none; }
       #recentFilesList button { display: block; width: 100%; box-sizing: border-box; text-align: left; background: none; border: none; border-radius: 0; color: #ddd; padding: 10px 14px; font-size: 13px; }
       #recentFilesList button:hover { background: #363636; }
+      #recentFilesList .recentFileRow { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+      #recentFilesList .recentFileName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #recentFilesList .recentFileMeta { flex-shrink: 0; font-size: 11px; color: #888; }
+      #recentFilesList .recentFilePath { display: block; margin-top: 2px; font-size: 11px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       #recentFilesEmpty { color: #777; font-size: 13px; padding: 10px 14px; }
       #landingStatus { min-height: 1em; font-size: 13px; }
       #landingStatus.error { color: #e06c6c; }
