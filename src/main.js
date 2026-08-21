@@ -228,22 +228,40 @@ function attachCommentSaveHook(app) {
 // changes tools. `annotationeditoruimanager` is the eventBus event pdf.js
 // itself dispatches each time it creates one, so we re-patch every time.
 //
-// Also patches updateMode() to suppress dirty-marking for its own
-// duration. Entering *any* editing mode — including AnnotationEditorType
-// .POPUP, the read-only "Comment" sidebar listing every comment in the
-// file — makes updateMode() call #enableAll(), which lazily converts each
-// pre-existing annotation on the page into an editable editor object the
-// first time editing mode is entered this session. That conversion goes
-// through the exact same addToAnnotationStorage()/setValue() path as a
-// genuine new annotation (tools.js #enableAll → annotation_editor_layer.js
-// enable/add → addToAnnotationStorage → setValue → #setModified), so it
-// fires our chained onSetModified too — meaning just opening and closing
-// the comment sidebar, with zero actual edits, was marking the document
-// dirty and autosaving nothing-changed. Nothing inside updateMode's own
-// call graph legitimately needs to mark dirty (mode-switching isn't
-// itself an edit), so suppressing markDirty for the span of one
-// updateMode() call is safe and catches this for every editing mode, not
-// just POPUP.
+// Also patches addToAnnotationStorage(editor) — the uiManager method that
+// registers an editor into annotationStorage, whether that editor is
+// genuinely new or not. Entering *any* editing mode — including
+// AnnotationEditorType.POPUP, the read-only "Comment" sidebar listing
+// every comment in the file — makes updateMode() call #enableAll(), which
+// lazily converts each pre-existing annotation on the page into an
+// editable editor object the first time editing mode is entered this
+// session, via this exact same addToAnnotationStorage()/setValue() path
+// (tools.js #enableAll → annotation_editor_layer.js enable/add →
+// addToAnnotationStorage → setValue → #setModified) — so without this
+// patch, just opening and closing the comment sidebar with zero actual
+// edits fires our chained onSetModified and marks the document dirty.
+//
+// An earlier version of this fix suppressed markDirty for the entire span
+// of updateMode() instead, which was too broad: updateMode() *also* opens
+// by synchronously committing whatever drawing/edit session was already
+// in progress (`this.#currentDrawingSession?.commitOrRemove()`, pdf.mjs)
+// — e.g. finishing a freehand Ink stroke and then switching tools, or
+// away from Highlight after drawing via the toolbar button rather than
+// the inline popup. That commit is a genuine edit, and it happens inside
+// the very updateMode() call we were suppressing, so it silently
+// swallowed real saves — reported as "freehand drawing doesn't autosave
+// unless I also touch the color/linewidth popup" and "sometimes" with the
+// toolbar-button highlight flow, both timing-dependent on whether a mode
+// switch intervened.
+//
+// The precise distinguisher pdf.js gives us is editor.annotationElementId
+// — set only when an editor corresponds to an annotation that already
+// existed in the original PDF, never for one the user just created. Since
+// addToAnnotationStorage/setValue/#setModified/onSetModified is a fully
+// synchronous chain with no internal awaits, bracketing suppressDirty
+// around just this one call is exact — no timing assumptions about *when*
+// within a broader async operation the false-positive call happens to
+// land, unlike the updateMode-wide version above.
 let undoRedoHookAttached = false;
 let suppressDirty = false;
 function attachUndoRedoHook(app) {
@@ -266,13 +284,18 @@ function attachUndoRedoHook(app) {
       originalRedo();
       markDirty();
     };
-    const originalUpdateMode = uiManager.updateMode.bind(uiManager);
-    uiManager.updateMode = async (...args) => {
-      suppressDirty = true;
-      try {
-        return await originalUpdateMode(...args);
-      } finally {
-        suppressDirty = false;
+    const originalAddToAnnotationStorage = uiManager.addToAnnotationStorage.bind(uiManager);
+    uiManager.addToAnnotationStorage = (editor) => {
+      if (editor?.annotationElementId) {
+        const wasSuppressed = suppressDirty;
+        suppressDirty = true;
+        try {
+          originalAddToAnnotationStorage(editor);
+        } finally {
+          suppressDirty = wasSuppressed;
+        }
+      } else {
+        originalAddToAnnotationStorage(editor);
       }
     };
   });
