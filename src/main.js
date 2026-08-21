@@ -372,6 +372,20 @@ document.addEventListener("webviewerloaded", (event) => {
 configurePdfjsPreferences();
 frame.src = "pdfjs/web/viewer.html";
 
+// A page reload (Vite HMR in dev; a WebView2 Ctrl+R/F5 refresh in prod)
+// resets all in-page JS state back to its initial values — including
+// currentTitleBase (see applyWindowTitleBar below), correctly landing back
+// on the plain landing screen — but does NOT touch the *native* OS window
+// title on its own: that's state Tauri's setTitle() previously set, and
+// nothing tells WebView2/the OS a reload just happened, so the title bar
+// just keeps showing whichever document was open beforehand. Reset it back
+// to the app's own default here, at startup, before any file has a chance
+// to be opened. Idempotent on a genuine fresh launch too, since
+// tauri.conf.json's configured window title is already "PDF Annotator".
+getCurrentWindow()
+  .setTitle("PDF Annotator")
+  .catch((err) => console.error("Could not reset window title:", err));
+
 // ---- Waiting for the embedded pdf.js viewer to be ready ---------------
 // pdf.js's viewer.html builds a global `PDFViewerApplication` and resolves
 // `PDFViewerApplication.initializedPromise` once it's ready to accept a
