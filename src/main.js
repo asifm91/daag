@@ -1,5 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile, writeFile, rename, exists } from "@tauri-apps/plugin-fs";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 // ---- State -----------------------------------------------------------
 let currentPath = null; // absolute path of the PDF currently open
@@ -15,22 +16,27 @@ const MAX_RECENT_FILES = 8;
 const landingScreen = document.getElementById("landingScreen");
 const viewerScreen = document.getElementById("viewerScreen");
 const openBtn = document.getElementById("openBtn");
-const saveBtn = document.getElementById("saveBtn");
-const statusEl = document.getElementById("status");
 const landingStatusEl = document.getElementById("landingStatus");
 const recentFilesListEl = document.getElementById("recentFilesList");
 const frame = document.getElementById("viewerFrame");
 
+// TEMPORARY: the outer toolbar (Save Now button + status text) has been
+// removed — the Save Now button was redundant with the toolbar-injected
+// Save button inside pdf.js's own UI (see injectSaveButton below), but
+// removing the status text leaves every call site below with nowhere to
+// show "Saving…"/"Saved"/dirty/error state while a document is open. This
+// just logs for now so nothing throws; see the conversation for a
+// shortlist of replacement UI patterns to pick from and wire in properly.
 function setStatus(text, kind = "") {
-  statusEl.textContent = text;
-  statusEl.className = kind;
+  (kind === "error" ? console.error : console.log)(`[status] ${text}`);
 }
 
 // Mirrors an error onto whichever screen is actually visible — openPath()
 // can fail while either one is showing (a stale recent-files entry is
 // clicked on the landing screen; a startup auto-reopen fails before the
-// viewer screen is ever shown), and #status lives inside viewerScreen so
-// it's invisible while landingScreen is up.
+// viewer screen is ever shown). landingStatusEl only exists on the
+// landing screen, so a failure while actually viewing a document
+// currently only reaches the console via setStatus above.
 function reportError(message) {
   setStatus(message, "error");
   landingStatusEl.textContent = message;
@@ -343,11 +349,70 @@ function renderRecentFiles() {
   }
 }
 
+// ---- Reflecting the open document in the native window titlebar --------
+// pdf.js has its own setTitle()/_docTitle logic (web/viewer.mjs), but it's
+// a no-op for us: `isViewerEmbedded: window.parent !== window` is true
+// for any iframe, and setTitle() early-returns without touching
+// document.title whenever that's set — by design, since an embedder is
+// expected to own the outer chrome (our native OS window, in this case)
+// itself. So instead of trying to read pdf.js's internal state, we fetch
+// the PDF's metadata ourselves via the public pdfDocument.getMetadata()
+// API and set the *native* window title directly via Tauri's window API
+// (needs the core:window:allow-set-title capability — not part of
+// core:default, see src-tauri/capabilities/default.json).
+//
+// The title-preference logic (XMP dc:title, skipping the placeholder
+// "Untitled" and titles that decoded to private-use-area garbage
+// characters, else the Info dictionary's Title field) mirrors pdf.js's
+// own `_docTitle` getter, just reimplemented against the public API
+// rather than reaching into private viewer state.
+//
+// Sets the filename immediately (metadata.getMetadata() is async and can
+// take a moment on a large/complex PDF) and refines it to the PDF's own
+// title afterwards if one turns out to be present. Guards against a
+// second file being opened before the first one's metadata fetch
+// resolves by checking pdfDocument is still the current one before
+// applying the refined title.
+// Private-use-area code points in a decoded title (hex FFF0 through
+// FFFF) mean the PDF's declared encoding didn't actually match its
+// bytes — pdf.js's own _docTitle getter (web/viewer.mjs) checks the same
+// range, via a regex; done here by code point comparison instead purely
+// because that regex's escape sequence kept getting mangled in transit
+// through this conversation, not for any functional reason.
+function hasPrivateUseAreaChar(text) {
+  for (const ch of text) {
+    const code = ch.codePointAt(0);
+    if (code >= 0xfff0 && code <= 0xffff) return true;
+  }
+  return false;
+}
+
+function updateWindowTitle(app, path) {
+  const { pdfDocument } = app;
+  const setWindowTitle = (title) =>
+    getCurrentWindow()
+      .setTitle(`${title} — PDF Annotator`)
+      .catch((err) => console.error("Could not set window title:", err));
+
+  setWindowTitle(filenameFromPath(path));
+
+  pdfDocument
+    ?.getMetadata()
+    .then(({ info, metadata }) => {
+      if (app.pdfDocument !== pdfDocument) return; // a newer document was opened meanwhile
+      const xmpTitle = metadata?.get("dc:title");
+      const pdfTitle =
+        xmpTitle && xmpTitle !== "Untitled" && !hasPrivateUseAreaChar(xmpTitle) ? xmpTitle : info?.Title;
+      if (pdfTitle) setWindowTitle(pdfTitle);
+    })
+    .catch((err) => console.error("Could not read PDF metadata for window title:", err));
+}
+
 // ---- Loading a document into the viewer ---------------------------------
 // Shared by every way a document can end up open — the outer/toolbar Open
-// buttons, a recent-files click, and the startup auto-reopen below — so
-// all of them end up in the exact same state: currentPath set, save
-// buttons enabled, annotation hooks attached, recent-files list updated.
+// buttons and a recent-files click — so all of them end up in the exact
+// same state: currentPath set, save buttons enabled, annotation hooks
+// attached, recent-files list updated, window title reflecting the doc.
 async function loadPdfIntoViewer(app, path, bytes) {
   // `open()` accepts a plain Uint8Array under `data`. Some pdf.js versions
   // want { data: bytes } directly, older ones wrap it differently —
@@ -356,11 +421,11 @@ async function loadPdfIntoViewer(app, path, bytes) {
 
   currentPath = path;
   dirty = false;
-  saveBtn.disabled = false;
   if (toolbarSaveButton) toolbarSaveButton.disabled = false;
   setStatus(`Open: ${path}`);
   addToRecentFiles(path);
   renderRecentFiles();
+  updateWindowTitle(app, path);
 
   attachAnnotationHooks(app);
 }
@@ -673,8 +738,6 @@ openBtn.addEventListener("click", () => pickAndOpenPdf().catch((err) => {
   console.error(err);
   reportError("Failed to open file — see console");
 }));
-
-saveBtn.addEventListener("click", () => saveNow({ force: true }));
 
 // Warn before quitting with unsaved changes (best-effort; not all
 // platforms surface this dialog from a webview the same way).

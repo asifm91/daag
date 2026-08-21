@@ -27,13 +27,8 @@
       #landingStatus.error { color: #e06c6c; }
 
       /* ---- Viewer screen: shown once a file is open ---- */
-      #viewerScreen { height: 100%; display: flex; flex-direction: column; }
-      #toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #1e1e1e; border-bottom: 1px solid #000; flex: none; }
-      #toolbar button { padding: 6px 12px; }
-      #status { font-size: 13px; color: #9ad19a; margin-left: auto; }
-      #status.dirty { color: #e0c46c; }
-      #status.error { color: #e06c6c; }
-      #viewerFrame { flex: 1; width: 100%; border: none; background: #525659; }
+      #viewerScreen { height: 100%; }
+      #viewerFrame { width: 100%; height: 100%; border: none; background: #525659; }
     </style>
   </head>
   <body>
@@ -49,11 +44,6 @@
     </div>
 
     <div id="viewerScreen" class="hidden">
-      <div id="toolbar">
-        <button id="saveBtn" disabled>Save Now</button>
-        <span id="status">No file open</span>
-      </div>
-
       <!--
         The pdf.js "generic" prebuilt viewer.
         Download a release from https://github.com/mozilla/pdf.js/releases
@@ -69,9 +59,15 @@
         that key once during startup, before annotationEditorMode setup)
         always sees them in time. It stays display:none (via the hidden
         viewerScreen wrapper) rather than unloaded while the landing
-        screen shows — main.js's init/hook wiring and last-file reopen
-        attempt still run in the background so the viewer's already warm
-        by the time a file is picked.
+        screen shows — main.js's init/hook wiring still runs in the
+        background so the viewer's already warm by the time a file is
+        picked.
+
+        No outer toolbar/status bar any more — Open and Save both live as
+        buttons injected into pdf.js's own toolbar (see injectOpenButton/
+        injectSaveButton in main.js). Status/error feedback currently only
+        reaches the console (see the TEMPORARY note on setStatus() in
+        main.js) pending a real replacement UI.
       -->
       <iframe id="viewerFrame"></iframe>
     </div>
