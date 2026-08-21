@@ -392,6 +392,24 @@ function blockInternalFileOpen(doc) {
   );
 }
 
+// ---- Disabling pdf.js's own "leave site?" prompt ------------------------
+// web/viewer.mjs registers its own `beforeunload` listener directly on the
+// iframe's window (bindWindowEvents -> onBeforeUnload), independent of and
+// in addition to our own accurate one in this file. It guards on
+// `_hasChanges()`, which is `annotationStorage.size > 0` — true for the
+// entire lifetime of any document that has ever had annotations, saved or
+// not, not "there are unsaved changes". Once autosave has already written
+// everything to disk, that prompt still fires on every reload/close because
+// the annotations are still sitting in storage. `_hasChanges()` is also
+// what gates pdf.js's internal close()'s auto-save-on-close, which goes
+// through the broken Save-As/blob-download path (see injectSaveButton) —
+// disabling it here is a fix for that too, not just the prompt. `_hasChanges`
+// is a plain instance method (not `#`-private), safe to reassign; our own
+// `dirty`-based beforeunload listener (below) is the real, accurate guard.
+function disableInternalBeforeUnloadPrompt(app) {
+  app._hasChanges = () => false;
+}
+
 // ---- Keyboard shortcuts: Save, and the annotation tools -----------------
 // Ctrl+O is handled above in blockInternalFileOpen (already intercepted
 // there to block pdf.js's unsafe internal open, so it's redirected to the
@@ -786,6 +804,7 @@ async function initializeViewer() {
   blockInternalFileOpen(frame.contentDocument);
   attachKeyboardShortcuts(frame.contentDocument);
   attachDragDropOpen();
+  disableInternalBeforeUnloadPrompt(app);
   addShortcutHints(frame.contentDocument);
 
   renderRecentFiles();
