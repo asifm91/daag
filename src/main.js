@@ -460,6 +460,31 @@ getCurrentWindow()
   .setTitle("PDF Annotator")
   .catch((err) => console.error("Could not reset window title:", err));
 
+// ---- Ctrl+W: same reload Ctrl+R/F5 already do natively -------------------
+// Ctrl+R/F5 aren't ours — they're WebView2's own reload accelerator,
+// handled above the DOM entirely, so they work everywhere regardless of
+// focus. Ctrl+W has no such native binding here (that's a browser-tab-strip
+// shortcut Edge itself owns, not something an embedded WebView2 control
+// implements), so we bind it ourselves to do the exact same thing:
+// window.location.reload() fires the same beforeunload sequence a native
+// reload does, so the existing unsaved-changes guard (bottom of this file)
+// applies for free — no separate dirty check needed here.
+function reloadWindow(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  window.location.reload();
+}
+
+// Attached at the parent-document level (in addition to the iframe-scoped
+// binding in attachKeyboardShortcuts) because the landing screen leaves the
+// PDF viewer iframe at display:none — it can't hold focus, so a listener
+// scoped only inside it would never see this key while no file is open.
+document.addEventListener("keydown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key?.toLowerCase() === "w") {
+    reloadWindow(event);
+  }
+});
+
 // ---- Waiting for the embedded pdf.js viewer to be ready ---------------
 // pdf.js's viewer.html builds a global `PDFViewerApplication` and resolves
 // `PDFViewerApplication.initializedPromise` once it's ready to accept a
@@ -977,6 +1002,8 @@ function attachKeyboardShortcuts(doc) {
           event.preventDefault();
           event.stopPropagation();
           saveNow({ force: true });
+        } else if (event.key?.toLowerCase() === "w") {
+          reloadWindow(event);
         }
         return;
       }
