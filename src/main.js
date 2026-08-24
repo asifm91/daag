@@ -1,5 +1,5 @@
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { readFile, writeFile, rename, exists } from "@tauri-apps/plugin-fs";
+import { readFile, writeFile, rename, exists, readDir } from "@tauri-apps/plugin-fs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { invoke } from "@tauri-apps/api/core";
@@ -18,6 +18,13 @@ let autosaveTimer = null;
 // which uniformly undoes every kind of edit at once, including ones
 // already autosaved to disk this session.
 let sessionOriginalBytes = null;
+
+// Folder-scoped Previous/Next navigation (see refreshFolderNavigation below).
+// Recomputed on every open rather than cached indefinitely, so it self-heals
+// if files are added/removed/renamed in the folder between navigations.
+let folderPdfDir = null; // absolute path of currentPath's containing folder
+let folderPdfList = []; // sorted filenames (not full paths) ending in .pdf
+let folderPdfIndex = -1; // index of currentPath's file within folderPdfList
 
 const AUTOSAVE_DEBOUNCE_MS = 4000; // save 4s after the last edit
 const AUTOSAVE_MAX_WAIT_MS = 20000; // ...but never wait longer than this
@@ -571,6 +578,78 @@ function injectOpenButton() {
   toolbarOpenButton = button;
 }
 
+// ---- Adding Previous/Next buttons to pdf.js's toolbar --------------------
+// Image-viewer-style navigation through every PDF in the current file's
+// folder. Disabled until a folder listing has been resolved (see
+// refreshFolderNavigation), same as Save/Undo All — there's nothing to
+// navigate to until a file is open. Injected the same way as every other
+// custom toolbar button, for the same reason (DOM injection survives a
+// pdf.js upgrade; a viewer.html edit wouldn't).
+let toolbarPrevButton = null;
+function injectPrevButton() {
+  if (toolbarPrevButton) return;
+  const doc = frame.contentDocument;
+  const downloadButton = doc.getElementById("downloadButton");
+  const group = downloadButton && downloadButton.closest(".toolbarHorizontalGroup");
+  if (!group) return;
+
+  ensureCustomStylesheetLoaded(doc);
+
+  const button = doc.createElement("button");
+  button.id = "customPrevButton";
+  button.className = "toolbarButton";
+  button.type = "button";
+  button.title = "Open the previous PDF in this folder (Alt+Left)";
+  button.disabled = true;
+  button.addEventListener("click", () =>
+    navigateFolder(-1).catch((err) => {
+      console.error(err);
+      reportError("Failed to open previous file — see console");
+    })
+  );
+
+  const label = doc.createElement("span");
+  label.textContent = "Previous File";
+  button.appendChild(label);
+
+  // After Open, before Save, so the toolbar reads Open, Previous, Next, Save.
+  group.insertBefore(button, toolbarSaveButton || null);
+
+  toolbarPrevButton = button;
+}
+
+let toolbarNextButton = null;
+function injectNextButton() {
+  if (toolbarNextButton) return;
+  const doc = frame.contentDocument;
+  const downloadButton = doc.getElementById("downloadButton");
+  const group = downloadButton && downloadButton.closest(".toolbarHorizontalGroup");
+  if (!group) return;
+
+  ensureCustomStylesheetLoaded(doc);
+
+  const button = doc.createElement("button");
+  button.id = "customNextButton";
+  button.className = "toolbarButton";
+  button.type = "button";
+  button.title = "Open the next PDF in this folder (Alt+Right)";
+  button.disabled = true;
+  button.addEventListener("click", () =>
+    navigateFolder(1).catch((err) => {
+      console.error(err);
+      reportError("Failed to open next file — see console");
+    })
+  );
+
+  const label = doc.createElement("span");
+  label.textContent = "Next File";
+  button.appendChild(label);
+
+  group.insertBefore(button, toolbarSaveButton || null);
+
+  toolbarNextButton = button;
+}
+
 // ---- Adding a status indicator to pdf.js's toolbar -----------------------
 // A small colored dot (idle/dirty/saving/saved/error — see custom-viewer
 // .css) reflecting the latest setStatus() call, doubling as the button
@@ -866,6 +945,15 @@ function attachKeyboardShortcuts(doc) {
         }
         return;
       }
+      if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+          event.preventDefault();
+          event.stopPropagation();
+          const button = doc.getElementById(event.key === "ArrowLeft" ? "customPrevButton" : "customNextButton");
+          if (button && !button.disabled) button.click();
+        }
+        return;
+      }
       if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
       if (isTypingTarget(doc)) return;
 
@@ -1106,6 +1194,50 @@ async function loadPdfIntoViewer(app, path, bytes) {
   updateWindowTitle(app, path);
 
   attachAnnotationHooks(app);
+
+  // Passive UI-state refresh, not part of the open itself — fire-and-forget
+  // so a slow or failing directory read never delays showing the document.
+  refreshFolderNavigation(path).catch((err) => {
+    console.error("Could not refresh folder navigation:", err);
+    if (toolbarPrevButton) toolbarPrevButton.disabled = true;
+    if (toolbarNextButton) toolbarNextButton.disabled = true;
+  });
+}
+
+// ---- Previous/Next: scanning the current file's folder for sibling PDFs --
+// Recomputed every time a file is opened (cheap: one directory read) rather
+// than cached indefinitely, so it self-heals if files were added, removed,
+// or renamed in the folder since the last navigation — no separate cache
+// invalidation needed.
+function updateFolderNavButtons() {
+  if (toolbarPrevButton) toolbarPrevButton.disabled = folderPdfIndex <= 0;
+  if (toolbarNextButton) {
+    toolbarNextButton.disabled = folderPdfIndex < 0 || folderPdfIndex >= folderPdfList.length - 1;
+  }
+}
+
+async function refreshFolderNavigation(path) {
+  const dir = await dirname(path);
+  const entries = await readDir(dir);
+  const list = entries
+    .filter((entry) => entry.isFile && entry.name?.toLowerCase().endsWith(".pdf"))
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+
+  const name = await basename(path);
+  const index = list.findIndex((entry) => entry.toLowerCase() === name.toLowerCase());
+
+  folderPdfDir = dir;
+  folderPdfList = list;
+  folderPdfIndex = index;
+  updateFolderNavButtons();
+}
+
+async function navigateFolder(delta) {
+  const targetIndex = folderPdfIndex + delta;
+  if (targetIndex < 0 || targetIndex >= folderPdfList.length) return;
+  const targetPath = await join(folderPdfDir, folderPdfList[targetIndex]);
+  await openPath(targetPath);
 }
 
 // ---- Deciding where a PDF is actually read from / saved back to ----------
@@ -1351,6 +1483,8 @@ async function initializeViewer() {
   attachUndoRedoHook(app);
   injectSaveButton();
   injectOpenButton();
+  injectPrevButton();
+  injectNextButton();
   injectStatusButton();
   injectSettingsButton();
   injectUndoAllButton();

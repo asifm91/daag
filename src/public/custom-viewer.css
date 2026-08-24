@@ -62,6 +62,30 @@
           mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M1 5V14H15V6H7L6 4H1Z'/%3E%3C/svg%3E");
 }
 
+/* Chevron glyphs for folder-scoped Previous/Next navigation — single solid
+   path each, same style as the Open folder icon above. */
+#customPrevButton::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M10 2L4 8L10 14L11.4 12.6L6.8 8L11.4 3.4Z'/%3E%3C/svg%3E");
+          mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M10 2L4 8L10 14L11.4 12.6L6.8 8L11.4 3.4Z'/%3E%3C/svg%3E");
+}
+
+#customPrevButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+#customNextButton::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M6 2L12 8L6 14L4.6 12.6L9.2 8L4.6 3.4Z'/%3E%3C/svg%3E");
+          mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M6 2L12 8L6 14L4.6 12.6L9.2 8L4.6 3.4Z'/%3E%3C/svg%3E");
+}
+
+#customNextButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* ---- Status indicator / activity-log opener --------------------------
  * A small colored dot rather than a monochrome mask-image icon like the
  * two above, so it overrides .toolbarButton::before's mask entirely

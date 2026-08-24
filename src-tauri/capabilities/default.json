@@ -12,6 +12,7 @@
     "fs:allow-write-file",
     "fs:allow-exists",
     "fs:allow-rename",
+    "fs:allow-read-dir",
     {
       "identifier": "fs:scope",
       "allow": ["**"]
