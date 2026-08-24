@@ -491,6 +491,15 @@ function ensureCustomStylesheetLoaded(doc) {
   doc.head.appendChild(link);
 }
 
+// A thin rule marking a boundary between clusters of toolbar buttons —
+// pdf.js's own class, already styled in viewer.css (same one used between
+// the editor-mode buttons and Print), so no custom-viewer.css entry needed.
+function createToolbarSeparator(doc) {
+  const separator = doc.createElement("div");
+  separator.className = "verticalToolbarSeparator";
+  return separator;
+}
+
 // ---- Adding our own Save button to pdf.js's toolbar --------------------
 // pdf.js's own toolbar has a button labeled "Save" (`downloadButton`, see
 // web/viewer.html) that's actually Save As: it builds a blob: URL and
@@ -531,6 +540,9 @@ function injectSaveButton() {
   label.textContent = "Save to Disk";
   button.appendChild(label);
 
+  // Own cluster, after Undo All/Export Comments/Print (native) and before
+  // Open/Previous/Next — see the toolbar layout comment above initializeViewer.
+  group.appendChild(createToolbarSeparator(doc));
   group.appendChild(button);
 
   toolbarSaveButton = button;
@@ -571,9 +583,10 @@ function injectOpenButton() {
   label.textContent = "Open File";
   button.appendChild(label);
 
-  // Before Save (falls back to appending if injectSaveButton hasn't run
-  // yet for some reason) so the toolbar reads left-to-right as Open, Save.
-  group.insertBefore(button, toolbarSaveButton || null);
+  // Starts the "pick a document" cluster (Open, Previous, Next) — after
+  // Save, its own separator first.
+  group.appendChild(createToolbarSeparator(doc));
+  group.appendChild(button);
 
   toolbarOpenButton = button;
 }
@@ -612,8 +625,9 @@ function injectPrevButton() {
   label.textContent = "Previous File";
   button.appendChild(label);
 
-  // After Open, before Save, so the toolbar reads Open, Previous, Next, Save.
-  group.insertBefore(button, toolbarSaveButton || null);
+  // Same "pick a document" cluster as Open — appended right after it, no
+  // separator between them.
+  group.appendChild(button);
 
   toolbarPrevButton = button;
 }
@@ -645,7 +659,7 @@ function injectNextButton() {
   label.textContent = "Next File";
   button.appendChild(label);
 
-  group.insertBefore(button, toolbarSaveButton || null);
+  group.appendChild(button); // same cluster as Open/Previous, no separator
 
   toolbarNextButton = button;
 }
@@ -676,7 +690,10 @@ function injectStatusButton() {
   label.textContent = "Activity Log";
   button.appendChild(label);
 
-  group.appendChild(button); // after Open, Save
+  // Starts the trailing "info" cluster (Status, Settings) — after
+  // Open/Previous/Next, its own separator first.
+  group.appendChild(createToolbarSeparator(doc));
+  group.appendChild(button);
 
   toolbarStatusButton = button;
 }
@@ -715,7 +732,7 @@ function injectSettingsButton() {
   label.textContent = "Settings";
   button.appendChild(label);
 
-  group.appendChild(button); // after Open, Save, Activity Log
+  group.appendChild(button); // same cluster as Status, no separator
 
   toolbarSettingsButton = button;
 }
@@ -748,7 +765,11 @@ function injectUndoAllButton() {
   label.textContent = "Undo All";
   button.appendChild(label);
 
-  group.appendChild(button); // after Open, Save, Activity Log, Settings
+  // Leftmost of our custom buttons — inserted before pdf.js's own Print
+  // button, right after the existing editor-tools separator, as the start
+  // of an "act on your edits" cluster (Undo All, Export Comments, Print).
+  const printButton = doc.getElementById("printButton");
+  group.insertBefore(button, printButton || null);
 
   toolbarUndoAllButton = button;
 }
@@ -785,7 +806,10 @@ function injectExportCommentsButton() {
   label.textContent = "Export Comments";
   button.appendChild(label);
 
-  group.appendChild(button); // after Open, Save, Activity Log, Settings, Undo All
+  // Same "act on your edits" cluster as Undo All and Print — inserted right
+  // after Undo All (also before Print), since both target the same anchor.
+  const printButton = doc.getElementById("printButton");
+  group.insertBefore(button, printButton || null);
 
   toolbarExportCommentsButton = button;
 }
@@ -1481,14 +1505,19 @@ async function initializeViewer() {
   const app = await waitForViewer();
   attachCommentSaveHook(app);
   attachUndoRedoHook(app);
+  // Call order determines left-to-right toolbar order (each injector
+  // appends/inserts relative to what's already there) — see the comment
+  // above each injector for its cluster. Final layout:
+  // [editor tools] | Undo All, Export Comments, Print | Save | Open,
+  // Previous, Next | Status, Settings
+  injectUndoAllButton();
+  injectExportCommentsButton();
   injectSaveButton();
   injectOpenButton();
   injectPrevButton();
   injectNextButton();
   injectStatusButton();
   injectSettingsButton();
-  injectUndoAllButton();
-  injectExportCommentsButton();
   blockInternalFileOpen(frame.contentDocument);
   attachKeyboardShortcuts(frame.contentDocument);
   attachDragDropOpen();
