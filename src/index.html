@@ -12,7 +12,21 @@
       button:disabled { opacity: 0.5; cursor: not-allowed; }
 
       /* ---- Landing screen: shown until a file is open ---- */
-      #landingScreen { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; box-sizing: border-box; padding: 24px; }
+      #landingScreen { position: relative; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; box-sizing: border-box; padding: 24px; transition: background-color 0.15s ease; }
+      #landingScreen.drag-active { background-color: #253247; }
+      #landingScreen.drag-invalid { background-color: #3a2b2b; }
+      #landingScreen.drag-active::after,
+      #landingScreen.drag-invalid::after {
+        content: "";
+        position: absolute;
+        inset: 18px;
+        border-radius: 12px;
+        pointer-events: none;
+        transition: opacity 0.15s ease;
+      }
+      #landingScreen.drag-active::after { border: 4px dashed #6ca0e0; animation: drag-pulse 2.6s ease-in-out infinite; }
+      #landingScreen.drag-invalid::after { border: 4px dashed #e06c6c; opacity: 0.6; }
+      @keyframes drag-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
       #landingScreen h1 { font-size: 18px; font-weight: 500; color: #bbb; margin: 0; }
       #openBtn { padding: 10px 22px; font-size: 14px; }
       #recentFilesPanel { width: min(480px, 100%); }

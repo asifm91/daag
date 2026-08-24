@@ -1297,7 +1297,23 @@ let dropInFlight = false;
 async function attachDragDropOpen() {
   const webview = getCurrentWebview();
   await webview.onDragDropEvent((event) => {
-    if (event.payload.type !== "drop" || dropInFlight) return;
+    // enter/over/leave only drive the landing screen's hover styling
+    // (invisible whenever it's hidden behind the viewer screen); the
+    // actual open logic below is unchanged and only acts on "drop".
+    if (event.payload.type === "enter") {
+      const hasPdf = event.payload.paths.some((p) => p.toLowerCase().endsWith(".pdf"));
+      landingScreen.classList.toggle("drag-active", hasPdf);
+      landingScreen.classList.toggle("drag-invalid", !hasPdf);
+      return;
+    }
+    if (event.payload.type === "leave") {
+      landingScreen.classList.remove("drag-active", "drag-invalid");
+      return;
+    }
+    if (event.payload.type !== "drop") return;
+
+    landingScreen.classList.remove("drag-active", "drag-invalid");
+    if (dropInFlight) return;
     const path = event.payload.paths.find((p) => p.toLowerCase().endsWith(".pdf"));
     if (!path) {
       reportError("Dropped file is not a PDF");
