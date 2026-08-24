@@ -46,10 +46,14 @@ are things that were actually hit and fixed.
 2. `bun install`
 3. Download a pdf.js **generic** prebuilt release from
    https://github.com/mozilla/pdf.js/releases (the `pdfjs-<version>-dist.zip`
-   asset, not the source zip) and unzip its contents into `src/pdfjs/`, so
-   that `src/pdfjs/web/viewer.html` exists. (Already vendored/committed in
-   this repo — only needed if you're setting this up somewhere without
-   that history.)
+   asset, not the source zip) and unzip its contents into `src/public/pdfjs/`,
+   so that `src/public/pdfjs/web/viewer.html` exists. It must live under
+   `src/public/` (Vite's `publicDir`) — anywhere else in `src/` is served
+   fine by the dev server but silently omitted from `vite build`'s output,
+   since the iframe points at it via a runtime string (`frame.src =
+   "pdfjs/web/viewer.html"` in main.js), not a static import Vite's build
+   can trace. (Already vendored/committed in this repo — only needed if
+   you're setting this up somewhere without that history.)
 4. `bun run tauri dev`
 
 ## How it works

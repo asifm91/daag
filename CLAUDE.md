@@ -201,8 +201,25 @@ in the frontend.
   resolve the local Tauri CLI (`could not determine executable to run`)
   even though it's present in `node_modules`. Fallback: call the binary
   directly — `./node_modules/.bin/tauri.exe icon ...`.
-- pdf.js's `web/` folder must live at `src/pdfjs/web/...` (inside Vite's
-  `root: "src"`), not at the project root.
+- pdf.js's `web/` folder must live at `src/public/pdfjs/web/...` — inside
+  Vite's `publicDir` (`src/public`), not merely inside `root: "src"`. The
+  iframe points at it via a runtime string (`frame.src =
+  "pdfjs/web/viewer.html"`), not a static import, so `vite build` can't
+  trace it into the bundle — anything outside `publicDir` gets silently
+  dropped from `dist/`. The dev server masks this completely: it serves
+  the whole `src/` tree directly, so a misplaced `src/pdfjs` (one level up
+  from `public/`) works perfectly under `tauri dev` and only breaks in a
+  packaged build, where the iframe 404s, `waitForViewer()` hangs with no
+  error, and the app just sits on the landing screen after Open. If pdf.js
+  ever needs re-vendoring from a fresh release zip, unzip it into
+  `src/public/pdfjs/`, not `src/pdfjs/`.
+- **A packaged build can silently run stale code if `CARGO_TARGET_DIR` is
+  set** (as it is on this machine: `D:\cargo-target`) — the real output
+  lands there, not `src-tauri/target/release/`. Launching the exe from the
+  in-tree `target/release` path runs whatever was last built before that
+  env var took effect, with no warning that it's out of date. Always
+  check `bun tauri build`'s own "Built application at: ..." output line
+  for the actual path rather than assuming the in-tree default.
 - Frontend JS errors do **not** show up in the terminal running
   `tauri dev` — only in the webview's own DevTools (right-click →
   Inspect Element). Check there first when something silently does
