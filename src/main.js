@@ -1562,10 +1562,14 @@ async function initializeViewer() {
   disableInternalBeforeUnloadPrompt(app);
   addShortcutHints(frame.contentDocument);
   seedDefaultCommenterName();
-
-  renderRecentFiles();
-  updateLandingOpenModeWarning();
 }
+
+// Landing-screen population is pure localStorage state with no dependency
+// on the pdf.js iframe — call immediately so the landing screen is fully
+// populated at first paint instead of jumping once initializeViewer()'s
+// waitForViewer() resolves (pdf.js's SPA boot can take a few hundred ms).
+renderRecentFiles();
+updateLandingOpenModeWarning();
 
 initializeViewer();
 

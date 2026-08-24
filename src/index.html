@@ -32,7 +32,8 @@
       #openBtn { padding: 10px 22px; font-size: 14px; }
       #landingSettingsBtn { width: 40px; height: 40px; padding: 0; font-size: 18px; line-height: 1; display: flex; align-items: center; justify-content: center; }
       #landingOpenModeWarning { margin: 0; font-size: 12px; color: #e0c46c; text-align: center; }
-      #recentFilesPanel { width: min(480px, 100%); }
+      #recentFilesPanel { width: min(480px, 100%); animation: recent-files-in 0.2s ease-out; }
+      @keyframes recent-files-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
       #recentFilesPanel h2 { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; color: #888; margin: 0 0 8px; }
       #recentFilesList { list-style: none; margin: 0; padding: 0; border: 1px solid #3a3a3a; border-radius: 6px; overflow: hidden; }
       #recentFilesList li { border-bottom: 1px solid #3a3a3a; }
