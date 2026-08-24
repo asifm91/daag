@@ -38,6 +38,8 @@ const COPY_MAPPINGS_KEY = "pdfAnnotator.copyMappings";
 const landingScreen = document.getElementById("landingScreen");
 const viewerScreen = document.getElementById("viewerScreen");
 const openBtn = document.getElementById("openBtn");
+const landingSettingsBtn = document.getElementById("landingSettingsBtn");
+const landingOpenModeWarningEl = document.getElementById("landingOpenModeWarning");
 const landingStatusEl = document.getElementById("landingStatus");
 const recentFilesListEl = document.getElementById("recentFilesList");
 const toastContainerEl = document.getElementById("toastContainer");
@@ -178,6 +180,14 @@ function setOpenMode(mode) {
   localStorage.setItem(OPEN_MODE_KEY, mode);
 }
 
+// Landing-screen-only nudge: "overwrite" saves annotations straight into
+// the original file with no per-open confirmation, so it's worth flagging
+// before the user picks a file. Refreshed on init and whenever Settings is
+// saved — those are the only two points the global mode can change.
+function updateLandingOpenModeWarning() {
+  landingOpenModeWarningEl.classList.toggle("hidden", getOpenMode() !== "overwrite");
+}
+
 // Per-original-file memory of what was decided, so reopening the same file
 // doesn't re-ask or re-copy — { [originalAbsolutePath]: {mode:"overwrite"}
 // | {mode:"copy", copyPath} }. Not capped like recent-files; this is small
@@ -228,6 +238,7 @@ function openSettingsDialog() {
 settingsDialogSaveButtonEl.addEventListener("click", () => {
   setCommenterName(commenterNameInputEl.value.trim());
   setOpenMode(openModeSelectEl.value);
+  updateLandingOpenModeWarning();
   settingsDialogEl.close();
 });
 settingsDialogCancelButtonEl.addEventListener("click", () => settingsDialogEl.close());
@@ -1526,6 +1537,7 @@ async function initializeViewer() {
   seedDefaultCommenterName();
 
   renderRecentFiles();
+  updateLandingOpenModeWarning();
 }
 
 initializeViewer();
@@ -2138,6 +2150,7 @@ openBtn.addEventListener("click", () => pickAndOpenPdf().catch((err) => {
   console.error(err);
   reportError("Failed to open file — see console");
 }));
+landingSettingsBtn.addEventListener("click", openSettingsDialog);
 
 // Warn before quitting with unsaved changes (best-effort; not all
 // platforms surface this dialog from a webview the same way).

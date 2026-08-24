@@ -28,7 +28,10 @@
       #landingScreen.drag-invalid::after { border: 4px dashed #e06c6c; opacity: 0.6; }
       @keyframes drag-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
       #landingScreen h1 { font-size: 18px; font-weight: 500; color: #bbb; margin: 0; }
+      #landingActions { display: flex; align-items: center; gap: 10px; }
       #openBtn { padding: 10px 22px; font-size: 14px; }
+      #landingSettingsBtn { width: 40px; height: 40px; padding: 0; font-size: 18px; line-height: 1; display: flex; align-items: center; justify-content: center; }
+      #landingOpenModeWarning { margin: 0; font-size: 12px; color: #e0c46c; text-align: center; }
       #recentFilesPanel { width: min(480px, 100%); }
       #recentFilesPanel h2 { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; color: #888; margin: 0 0 8px; }
       #recentFilesList { list-style: none; margin: 0; padding: 0; border: 1px solid #3a3a3a; border-radius: 6px; overflow: hidden; }
@@ -118,7 +121,11 @@
     <!-- Shown until a file is open — see showViewer() in main.js -->
     <div id="landingScreen">
       <h1>PDF Annotator</h1>
-      <button id="openBtn">Open PDF…</button>
+      <div id="landingActions">
+        <button id="openBtn">Open PDF…</button>
+        <button id="landingSettingsBtn" title="Settings" aria-label="Settings">⚙</button>
+      </div>
+      <p id="landingOpenModeWarning" class="hidden">⚠ Always-overwrite mode — annotations save directly into the original file.</p>
       <div id="recentFilesPanel">
         <h2>Recent</h2>
         <ul id="recentFilesList"></ul>
