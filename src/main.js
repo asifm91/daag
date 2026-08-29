@@ -48,6 +48,12 @@ let currentTheme = THEME_CYCLE.includes(localStorage.getItem(THEME_KEY))
 const bodyEl = document.body;
 const titlebarEl = document.getElementById("titlebar");
 const titlebarTitleEl = document.getElementById("titlebarTitle");
+const titlebarDocActionsEl = document.getElementById("titlebarDocActions");
+const titlebarOpenBtn = document.getElementById("titlebarOpenBtn");
+const titlebarPrevBtn = document.getElementById("titlebarPrevBtn");
+const titlebarNextBtn = document.getElementById("titlebarNextBtn");
+const titlebarStatusBtn = document.getElementById("titlebarStatusBtn");
+const titlebarSettingsBtn = document.getElementById("titlebarSettingsBtn");
 const titlebarThemeBtn = document.getElementById("titlebarThemeBtn");
 const titlebarMinimizeBtn = document.getElementById("titlebarMinimizeBtn");
 const titlebarMaximizeBtn = document.getElementById("titlebarMaximizeBtn");
@@ -404,6 +410,7 @@ function promptContinueOrStartOver(originalPath, copyPath) {
 function showViewer() {
   landingScreen.classList.add("hidden");
   viewerScreen.classList.remove("hidden");
+  titlebarDocActionsEl.classList.remove("hidden");
   updateTitlebarChrome();
 }
 
@@ -689,201 +696,52 @@ function injectSaveButton() {
   label.textContent = "Save to Disk";
   button.appendChild(label);
 
-  // Own cluster, after Undo All/Export Comments/Print (native) and before
-  // Open/Previous/Next — see the toolbar layout comment above initializeViewer.
+  // Last button in this toolbar — after Undo All/Export Comments/Print
+  // (native); see the toolbar layout comment above initializeViewer.
   group.appendChild(createToolbarSeparator(doc));
   group.appendChild(button);
 
   toolbarSaveButton = button;
 }
 
-// ---- Adding our own Open button to pdf.js's toolbar ---------------------
-// Once a document is open, the outer landing screen's Open button and
-// recent-files list are hidden (see showViewer()) — this is how you open
-// a different file without pdf.js's own broken/blocked internal paths
-// (see blockInternalFileOpen below) while already viewing something.
-// Injected the same way and for the same reason as injectSaveButton
-// above: DOM, not a viewer.html edit, so a pdf.js upgrade can't silently
-// erase it. Never disabled — unlike Save, opening doesn't depend on a
-// document already being loaded.
-let toolbarOpenButton = null;
-function injectOpenButton() {
-  if (toolbarOpenButton) return;
-  const doc = frame.contentDocument;
-  const downloadButton = doc.getElementById("downloadButton");
-  const group = downloadButton && downloadButton.closest(".toolbarHorizontalGroup");
-  if (!group) return;
-
-  ensureCustomStylesheetLoaded(doc);
-
-  const button = doc.createElement("button");
-  button.id = "customOpenButton";
-  button.className = "toolbarButton";
-  button.type = "button";
-  button.title = "Open a different PDF file (Ctrl+O)";
-  button.addEventListener("click", () =>
-    pickAndOpenPdf().catch((err) => {
-      console.error(err);
-      reportError("Failed to open file");
-    })
-  );
-
-  const label = doc.createElement("span");
-  label.textContent = "Open File";
-  button.appendChild(label);
-
-  // Starts the "pick a document" cluster (Open, Previous, Next) — after
-  // Save, its own separator first.
-  group.appendChild(createToolbarSeparator(doc));
-  group.appendChild(button);
-
-  toolbarOpenButton = button;
-}
-
-// ---- Adding Previous/Next buttons to pdf.js's toolbar --------------------
-// Image-viewer-style navigation through every PDF in the current file's
-// folder. Disabled until a folder listing has been resolved (see
-// refreshFolderNavigation), same as Save/Undo All — there's nothing to
-// navigate to until a file is open. Injected the same way as every other
-// custom toolbar button, for the same reason (DOM injection survives a
-// pdf.js upgrade; a viewer.html edit wouldn't).
-let toolbarPrevButton = null;
-function injectPrevButton() {
-  if (toolbarPrevButton) return;
-  const doc = frame.contentDocument;
-  const downloadButton = doc.getElementById("downloadButton");
-  const group = downloadButton && downloadButton.closest(".toolbarHorizontalGroup");
-  if (!group) return;
-
-  ensureCustomStylesheetLoaded(doc);
-
-  const button = doc.createElement("button");
-  button.id = "customPrevButton";
-  button.className = "toolbarButton";
-  button.type = "button";
-  button.title = "Open the previous PDF in this folder (Alt+Left)";
-  button.disabled = true;
-  button.addEventListener("click", () =>
-    navigateFolder(-1).catch((err) => {
-      console.error(err);
-      reportError("Failed to open previous file");
-    })
-  );
-
-  const label = doc.createElement("span");
-  label.textContent = "Previous File";
-  button.appendChild(label);
-
-  // Same "pick a document" cluster as Open — appended right after it, no
-  // separator between them.
-  group.appendChild(button);
-
-  toolbarPrevButton = button;
-}
-
-let toolbarNextButton = null;
-function injectNextButton() {
-  if (toolbarNextButton) return;
-  const doc = frame.contentDocument;
-  const downloadButton = doc.getElementById("downloadButton");
-  const group = downloadButton && downloadButton.closest(".toolbarHorizontalGroup");
-  if (!group) return;
-
-  ensureCustomStylesheetLoaded(doc);
-
-  const button = doc.createElement("button");
-  button.id = "customNextButton";
-  button.className = "toolbarButton";
-  button.type = "button";
-  button.title = "Open the next PDF in this folder (Alt+Right)";
-  button.disabled = true;
-  button.addEventListener("click", () =>
-    navigateFolder(1).catch((err) => {
-      console.error(err);
-      reportError("Failed to open next file");
-    })
-  );
-
-  const label = doc.createElement("span");
-  label.textContent = "Next File";
-  button.appendChild(label);
-
-  group.appendChild(button); // same cluster as Open/Previous, no separator
-
-  toolbarNextButton = button;
-}
-
-// ---- Adding a status indicator to pdf.js's toolbar -----------------------
-// A small colored dot (idle/dirty/saving/saved/error — see custom-viewer
-// .css) reflecting the latest setStatus() call, doubling as the button
-// that opens the full activity log (openLogDialog, above). Injected the
-// same way and for the same reasons as injectSaveButton/injectOpenButton.
-let toolbarStatusButton = null;
-function injectStatusButton() {
-  if (toolbarStatusButton) return;
-  const doc = frame.contentDocument;
-  const downloadButton = doc.getElementById("downloadButton");
-  const group = downloadButton && downloadButton.closest(".toolbarHorizontalGroup");
-  if (!group) return;
-
-  ensureCustomStylesheetLoaded(doc);
-
-  const button = doc.createElement("button");
-  button.id = "customStatusButton";
-  button.className = "toolbarButton status-saved";
-  button.type = "button";
-  button.title = "View activity log";
-  button.addEventListener("click", openLogDialog);
-
-  const label = doc.createElement("span");
-  label.textContent = "Activity Log";
-  button.appendChild(label);
-
-  // Starts the trailing "info" cluster (Status, Settings) — after
-  // Open/Previous/Next, its own separator first.
-  group.appendChild(createToolbarSeparator(doc));
-  group.appendChild(button);
-
-  toolbarStatusButton = button;
-}
+// ---- Open/Previous/Next/Activity Log/Settings: titlebar, not pdf.js's
+// toolbar -------------------------------------------------------------
+// Unlike Save/Undo All/Export Comments below, these live as static HTML in
+// the titlebar (#titlebarDocActions in index.html) rather than being
+// DOM-injected into pdf.js's toolbar — they don't need to survive a pdf.js
+// upgrade the way toolbar buttons do, since they're not inside viewer.html
+// at all. Wired here, unconditionally, rather than gated behind
+// waitForViewer() like the injectors below: being outside the iframe
+// entirely, there's no pdf.js readiness to wait for. Hidden until a file
+// is open (updateTitlebarDocActionsVisibility, called from showViewer())
+// — the landing screen already has its own Open/Settings buttons, and
+// Previous/Next/Activity Log have nothing to act on before then anyway.
+titlebarOpenBtn.addEventListener("click", () =>
+  pickAndOpenPdf().catch((err) => {
+    console.error(err);
+    reportError("Failed to open file");
+  })
+);
+titlebarPrevBtn.addEventListener("click", () =>
+  navigateFolder(-1).catch((err) => {
+    console.error(err);
+    reportError("Failed to open previous file");
+  })
+);
+titlebarNextBtn.addEventListener("click", () =>
+  navigateFolder(1).catch((err) => {
+    console.error(err);
+    reportError("Failed to open next file");
+  })
+);
+titlebarStatusBtn.addEventListener("click", openLogDialog);
+titlebarSettingsBtn.addEventListener("click", openSettingsDialog);
 
 // setStatus's `kind` doubles as the indicator's visual state, except ""
 // (used for routine info like "Open: <path>" and "Saved <time>") maps to
 // the "saved" (green/idle-good) dot rather than getting its own class.
 function updateStatusIndicator(kind) {
-  if (!toolbarStatusButton) return;
-  toolbarStatusButton.className = `toolbarButton status-${kind || "saved"}`;
-}
-
-// ---- Adding a Settings button to pdf.js's toolbar ------------------------
-// Opens #settingsDialog (in the parent document, not the iframe — same as
-// the status button opening #logDialog above) to edit the global commenter
-// name. Injected the same way and for the same reasons as the other
-// toolbar buttons.
-let toolbarSettingsButton = null;
-function injectSettingsButton() {
-  if (toolbarSettingsButton) return;
-  const doc = frame.contentDocument;
-  const downloadButton = doc.getElementById("downloadButton");
-  const group = downloadButton && downloadButton.closest(".toolbarHorizontalGroup");
-  if (!group) return;
-
-  ensureCustomStylesheetLoaded(doc);
-
-  const button = doc.createElement("button");
-  button.id = "customSettingsButton";
-  button.className = "toolbarButton";
-  button.type = "button";
-  button.title = "Settings";
-  button.addEventListener("click", openSettingsDialog);
-
-  const label = doc.createElement("span");
-  label.textContent = "Settings";
-  button.appendChild(label);
-
-  group.appendChild(button); // same cluster as Status, no separator
-
-  toolbarSettingsButton = button;
+  titlebarStatusBtn.className = `titlebarButton status-${kind || "saved"}`;
 }
 
 // ---- Adding an "Undo All" button to pdf.js's toolbar ---------------------
@@ -1124,8 +982,10 @@ function attachKeyboardShortcuts(doc) {
         if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
           event.preventDefault();
           event.stopPropagation();
-          const button = doc.getElementById(event.key === "ArrowLeft" ? "customPrevButton" : "customNextButton");
-          if (button && !button.disabled) button.click();
+          // These buttons live in the titlebar (outer document) now, not
+          // in doc (the iframe) like the pdf.js tool buttons below.
+          const button = event.key === "ArrowLeft" ? titlebarPrevBtn : titlebarNextBtn;
+          if (!button.disabled) button.click();
         }
         return;
       }
@@ -1379,8 +1239,8 @@ async function loadPdfIntoViewer(app, path, bytes) {
   // so a slow or failing directory read never delays showing the document.
   refreshFolderNavigation(path).catch((err) => {
     console.error("Could not refresh folder navigation:", err);
-    if (toolbarPrevButton) toolbarPrevButton.disabled = true;
-    if (toolbarNextButton) toolbarNextButton.disabled = true;
+    titlebarPrevBtn.disabled = true;
+    titlebarNextBtn.disabled = true;
   });
 }
 
@@ -1390,10 +1250,8 @@ async function loadPdfIntoViewer(app, path, bytes) {
 // or renamed in the folder since the last navigation — no separate cache
 // invalidation needed.
 function updateFolderNavButtons() {
-  if (toolbarPrevButton) toolbarPrevButton.disabled = folderPdfIndex <= 0;
-  if (toolbarNextButton) {
-    toolbarNextButton.disabled = folderPdfIndex < 0 || folderPdfIndex >= folderPdfList.length - 1;
-  }
+  titlebarPrevBtn.disabled = folderPdfIndex <= 0;
+  titlebarNextBtn.disabled = folderPdfIndex < 0 || folderPdfIndex >= folderPdfList.length - 1;
 }
 
 async function refreshFolderNavigation(path) {
@@ -1645,14 +1503,14 @@ async function attachDragDropOpen() {
 
 // ---- App-wide viewer setup (runs once, independent of any open file) ---
 // attachCommentSaveHook/attachUndoRedoHook listen on the persistent
-// app.eventBus, injectSaveButton/injectOpenButton just create toolbar
-// buttons, and blockInternalFileOpen/attachKeyboardShortcuts/
-// attachDragDropOpen must be active *before* the user ever opens a file
-// through us — closing off pdf.js's own "Open File" paths, taking over
-// Ctrl+O/Ctrl+S, and accepting a dropped file are all reachable from the
-// very first landing screen (Tools-menu entry, drag-and-drop, the keys
-// themselves) with no dependency on a file ever having been opened
-// through us. None of this belongs gated behind our own Open button.
+// app.eventBus, injectSaveButton just creates a toolbar button, and
+// blockInternalFileOpen/attachKeyboardShortcuts/attachDragDropOpen must be
+// active *before* the user ever opens a file through us — closing off
+// pdf.js's own "Open File" paths, taking over Ctrl+O/Ctrl+S, and accepting
+// a dropped file are all reachable from the very first landing screen
+// (Tools-menu entry, drag-and-drop, the keys themselves) with no
+// dependency on a file ever having been opened through us. None of this
+// belongs gated behind our own Open button.
 //
 // Deliberately does NOT auto-reopen the most recent file — the landing
 // screen (Open button + recent-files list) is always what greets you on
@@ -1664,16 +1522,12 @@ async function initializeViewer() {
   // Call order determines left-to-right toolbar order (each injector
   // appends/inserts relative to what's already there) — see the comment
   // above each injector for its cluster. Final layout:
-  // [editor tools] | Undo All, Export Comments, Print | Save | Open,
-  // Previous, Next | Status, Settings
+  // [editor tools] | Undo All, Export Comments, Print | Save
+  // Open/Previous/Next/Activity Log/Settings moved to the titlebar (see
+  // #titlebarDocActions in index.html) — not injected here at all.
   injectUndoAllButton();
   injectExportCommentsButton();
   injectSaveButton();
-  injectOpenButton();
-  injectPrevButton();
-  injectNextButton();
-  injectStatusButton();
-  injectSettingsButton();
   blockInternalFileOpen(frame.contentDocument);
   attachKeyboardShortcuts(frame.contentDocument);
   attachDragDropOpen();

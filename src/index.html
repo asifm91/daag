@@ -57,10 +57,29 @@
          app theme — see updateTitlebarChrome() in main.js. ---- */
       #titlebar { flex: 0 0 auto; height: 32px; display: flex; align-items: stretch; background: #1f1f1f; user-select: none; -webkit-user-select: none; }
       #titlebarTitle { flex: 1; display: flex; align-items: center; padding-left: 12px; font-size: 12px; color: #aaa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #titlebarDocActions { flex: 0 0 auto; display: flex; }
       #titlebarControls { flex: 0 0 auto; display: flex; }
       .titlebarButton { flex: 0 0 auto; width: 46px; height: 100%; display: flex; align-items: center; justify-content: center; background: none; border: none; border-radius: 0; padding: 0; color: #ccc; }
       .titlebarButton:hover { background: #3a3a3a; }
+      .titlebarButton:disabled { opacity: 0.4; cursor: not-allowed; }
       .titlebarButton svg { width: 10px; height: 10px; stroke: currentColor; stroke-width: 1; fill: none; }
+      /* Square (width == titlebar height) with a bigger icon relative to
+         the button, unlike the window-controls cluster's wider/more-padded
+         46px buttons — these sit right next to document content, so a
+         tighter, more icon-forward look reads better here. */
+      #titlebarDocActions .titlebarButton { width: 32px; }
+      #titlebarDocActions .titlebarButton svg { width: 16px; height: 16px; }
+      .titlebarStatusDot { width: 10px; height: 10px; border-radius: 50%; background-color: var(--status-color, #888); }
+      /* Marks the boundary between the document-actions cluster and the
+         window-controls cluster — lives inside #titlebarDocActions (as its
+         last child) purely so it hides/shows along with the rest of that
+         cluster for free, with no separate visibility toggle needed. */
+      .titlebarSeparator { width: 1px; margin: 7px 4px; background: rgba(255, 255, 255, 0.15); }
+      #titlebar.titlebar-light .titlebarSeparator { background: rgba(0, 0, 0, 0.15); }
+      #titlebarStatusBtn.status-dirty { --status-color: #e0c46c; }
+      #titlebarStatusBtn.status-saving { --status-color: #6ca0e0; }
+      #titlebarStatusBtn.status-error { --status-color: #e06c6c; }
+      #titlebarStatusBtn.status-saved { --status-color: #6ce0a0; }
       .titlebarButton .icon-restore,
       .titlebarButton .icon-theme-light,
       .titlebarButton .icon-theme-dark { display: none; }
@@ -197,6 +216,42 @@
          mousedown's own target carries the attribute, not an ancestor's. -->
     <div id="titlebar" data-tauri-drag-region>
       <span id="titlebarTitle" data-tauri-drag-region>PDF Annotator</span>
+      <!-- Hidden until a file is open (see showViewer() in main.js) — the
+           landing screen has its own Open/Settings buttons already
+           (#openBtn/#landingSettingsBtn below), so these would be
+           redundant with it there; Previous/Next/Activity Log have no
+           landing-screen equivalent at all. -->
+      <div id="titlebarDocActions" class="hidden">
+        <button id="titlebarOpenBtn" class="titlebarButton" type="button" title="Open a different PDF file (Ctrl+O)">
+          <svg viewBox="0 0 16 16"><path fill="currentColor" stroke="none" d="M1 5V14H15V6H7L6 4H1Z" /></svg>
+        </button>
+        <button id="titlebarPrevBtn" class="titlebarButton" type="button" title="Open the previous PDF in this folder (Alt+Left)" disabled>
+          <svg viewBox="0 0 16 16"><path fill="currentColor" stroke="none" d="M10 2L4 8L10 14L11.4 12.6L6.8 8L11.4 3.4Z" /></svg>
+        </button>
+        <button id="titlebarNextBtn" class="titlebarButton" type="button" title="Open the next PDF in this folder (Alt+Right)" disabled>
+          <svg viewBox="0 0 16 16"><path fill="currentColor" stroke="none" d="M6 2L12 8L6 14L4.6 12.6L9.2 8L4.6 3.4Z" /></svg>
+        </button>
+        <button id="titlebarStatusBtn" class="titlebarButton status-saved" type="button" title="View activity log">
+          <span class="titlebarStatusDot"></span>
+        </button>
+        <button id="titlebarSettingsBtn" class="titlebarButton" type="button" title="Settings">
+          <svg viewBox="0 0 16 16">
+            <defs><mask id="titlebarSettingsHole"><rect width="16" height="16" fill="white" /><circle cx="8" cy="8" r="1.8" fill="black" /></mask></defs>
+            <g mask="url(#titlebarSettingsHole)" fill="currentColor" stroke="none">
+              <circle cx="8" cy="8" r="4.2" />
+              <rect x="6.8" y="2.5" width="2.4" height="1.6" />
+              <rect x="6.8" y="2.5" width="2.4" height="1.6" transform="rotate(45 8 8)" />
+              <rect x="6.8" y="2.5" width="2.4" height="1.6" transform="rotate(90 8 8)" />
+              <rect x="6.8" y="2.5" width="2.4" height="1.6" transform="rotate(135 8 8)" />
+              <rect x="6.8" y="2.5" width="2.4" height="1.6" transform="rotate(180 8 8)" />
+              <rect x="6.8" y="2.5" width="2.4" height="1.6" transform="rotate(225 8 8)" />
+              <rect x="6.8" y="2.5" width="2.4" height="1.6" transform="rotate(270 8 8)" />
+              <rect x="6.8" y="2.5" width="2.4" height="1.6" transform="rotate(315 8 8)" />
+            </g>
+          </svg>
+        </button>
+        <div class="titlebarSeparator"></div>
+      </div>
       <div id="titlebarControls">
         <button id="titlebarThemeBtn" class="titlebarButton" type="button" data-theme="default">
           <svg class="icon-theme-default" viewBox="0 0 10 10">
