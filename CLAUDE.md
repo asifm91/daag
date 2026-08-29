@@ -29,33 +29,125 @@ Vite/Tauri, so no postMessage or blob-URL handoff is needed.
   first, capped at 8). Startup deliberately does **not** auto-reopen the
   last file — landing always greets you first.
 - `#viewerScreen` — wraps the pdf.js iframe, shown once a document is
-  open. Has no chrome of its own any more (the old outer toolbar with a
-  Save button and status text was removed) — Open/Save/status-log all
-  live as buttons injected *into pdf.js's own toolbar* (see below).
+  open. Has no chrome of its own beyond the shared titlebar — document
+  actions split across two places: Open/Previous/Next/Activity Log/
+  Settings live in the custom titlebar (see below), hidden until a
+  document is open; Save/Undo All/Export Comments stay injected *into
+  pdf.js's own toolbar* (see further below) since they're specific to
+  the open document's editing session.
 
 The iframe stays `display:none` (not unloaded) while the landing screen
 shows, so pdf.js and all the hooks below are already warm by the time a
 file is picked.
 
+### Custom titlebar
+`app.windows[0].decorations` is `false` in `tauri.conf.json` — no native
+Windows titlebar at all. `#titlebar` in `index.html`
+(`data-tauri-drag-region`) replaces it entirely:
+- **Window controls** — minimize/maximize/close call straight into
+  `@tauri-apps/api/window`'s `getCurrentWindow()`. The maximize button's
+  icon (two-square ⇄ single-square) is kept in sync via
+  `getCurrentWindow().onResized()` + `isMaximized()`
+  (`syncMaximizeButtonState`) rather than just toggled on click, since
+  the window can also un/maximize via OS gestures (double-clicking the
+  titlebar — `data-tauri-drag-region`'s own built-in behavior — window
+  snap, keyboard shortcuts) that never go through our click handler.
+- **`data-tauri-drag-region` checks the exact `event.target`**, not
+  `.closest()` — confirmed before relying on it: a button placed inside
+  a draggable container is safe from accidentally starting a drag as
+  long as the button itself (not just an ancestor) lacks the attribute.
+- **`#titlebarDocActions`** — Open, Previous, Next, Activity Log
+  (status dot), Settings. Relocated here from pdf.js's own toolbar
+  (where they lived as injected DOM — see below) specifically so they
+  could be hidden on the landing screen and shown only once a document
+  is open (`showViewer()` un-hides `#titlebarDocActions`) — not possible
+  while pdf.js's own toolbar was the only place to put them, since that
+  toolbar only exists inside the iframe. Being hand-authored in
+  `index.html` (which we own outright) rather than injected DOM (only
+  needed for elements living *inside* pdf.js's own vendored toolbar),
+  they're wired with plain top-level `addEventListener` calls — no
+  `waitForViewer()` gating, no CSS-injection dance.
+- Square buttons with reduced padding for this cluster specifically
+  (`#titlebarDocActions .titlebarButton`) — the titlebar's default
+  button sizing (built for the window-controls cluster) felt too small/
+  cramped once these five moved out of pdf.js's own toolbar chrome. A
+  `.titlebarSeparator` divider sits between this cluster and the
+  theme/window-controls cluster.
+- The Settings gear icon (`#titlebarSettingsBtn`) is inline SVG: a
+  filled circle, a `<mask>` cutout hole, and 8 rotated tooth rectangles
+  — matched against the landing page's own gear button so both read as
+  the same icon. Tooth proportions matter more than they look: too
+  little of each tooth rectangle overlapping the body circle reads as a
+  spiky asterisk, not a gear.
+
+### Theming
+One user-facing toggle (`#titlebarThemeBtn`, cycles default → light →
+dark → default, persisted in `localStorage`) drives three independent
+things, computed differently:
+1. **Outer chrome** (landing screen, dialogs, titlebar's own base
+   styling) — a `body.theme-light` class swap against CSS custom
+   properties defined in `index.html`'s `:root`.
+2. **Titlebar light/dark state specifically** — `updateTitlebarChrome()`,
+   kept separate from the chrome swap above because it depends on *both*
+   the chosen theme *and* whether the viewer is currently showing (the
+   default theme is dark landing / light viewer, so the titlebar itself
+   needs to flip to a light background once a document is open even
+   though nothing else did) — rerun from both `applyTheme()` and
+   `showViewer()`.
+3. **The pdf.js viewer itself** (`applyPdfjsColorScheme`) —
+   `pdfjsColorSchemeMode()` maps our three-way toggle down to pdf.js's
+   two-way light/dark, via two mechanisms layered together, because
+   pdf.js only reads its own theme preference once, at its own startup:
+   - `configurePdfjsPreferences()` seeds the `viewerCssTheme`
+     `OptionKind.PREFERENCE` AppOption (1=light, 2=dark) via the same
+     `localStorage["pdfjs.preferences"]` trick used for
+     `enableComment`/`enableHighlightFloatingButton` — read by pdf.js's
+     own `initialize()` on first load.
+   - `applyPdfjsColorScheme()` pokes `color-scheme` directly onto
+     `frame.contentWindow.document.documentElement.style` — the exact
+     call pdf.js's own `initialize()` makes internally
+     (`docStyle.setProperty("color-scheme", mode)`) — for instant
+     mid-session switching without reloading the iframe. Called from
+     three places with different warmth guarantees: once synchronously
+     at module init right after `frame.src` is assigned (iframe still
+     on its placeholder document — a deliberate no-op, guarded by
+     optional chaining throughout), once for real once
+     `initializeViewer()`'s `waitForViewer()` resolves (this is what
+     actually seeds things for a document opened before ever touching
+     the theme button), and again on every subsequent theme-button
+     click.
+   - Also sets a plain `--app-color-scheme` custom property alongside
+     `color-scheme` itself, and refreshes a memoized pdf.js color cache
+     (`refreshPdfjsCommentForegroundColorCache`) — both specifically for
+     comment popup/marker theming, which needed much more than the
+     plain `color-scheme` poke above. See "Comment popups/markers have
+     their own `color-scheme`" under Known rough edges for the full
+     story, including a known unfixed gap (marker background color
+     frozen at first paint).
+
 ### Buttons injected into pdf.js's toolbar
-pdf.js's own toolbar buttons for Save and Open are broken or dangerous in
-this embedding (see Known rough edges), so they're hidden via
-`src/public/custom-viewer.css` and replaced with our own, injected as DOM
-from `main.js` (never hand-edited into `viewer.html` — that file gets
-dropped in wholesale on a pdf.js upgrade, silently erasing any hand
-patch):
-- **Open** (`injectOpenButton`) — the *only* safe way to open a different
-  file once already viewing one (see the internal-open-paths gotcha).
+pdf.js's own Save button is broken in this embedding (see Known rough
+edges), so it's hidden via `src/public/custom-viewer.css` and replaced
+with our own, injected as DOM from `main.js` (never hand-edited into
+`viewer.html` — that file gets dropped in wholesale on a pdf.js upgrade,
+silently erasing any hand patch). Open, Previous/Next, Activity Log, and
+Settings *used to* live here too but were relocated to the custom
+titlebar (see above) so they could be hidden on the landing screen —
+what's left injected into pdf.js's own toolbar is specific to the open
+document's editing session, not general app chrome:
 - **Save** (`injectSaveButton`) — force-saves via the same path as
-  autosave.
-- **Status dot** (`injectStatusButton`) — small colored dot
-  (idle/dirty/saving/error/saved) that opens a full activity-log
-  `<dialog>` on click.
+  autosave. Last button in this group.
 - **Undo All** (`injectUndoAllButton`) — reverts to the file's state at
   session start; see Undo All flow below. Has no broken pdf.js
   counterpart to hide, it's purely additive.
+- **Export Comments** (`injectExportCommentsButton`) — exports the
+  file's comments; purely additive, no pdf.js counterpart.
 
-All four share one externally-loaded stylesheet
+Injector call order in `initializeViewer()` determines left-to-right
+placement among what's injected; final toolbar layout is [editor tools]
+| Undo All, Export Comments, Print (pdf.js's own, untouched) | Save.
+
+All three share one externally-loaded stylesheet
 (`ensureCustomStylesheetLoaded` → `public/custom-viewer.css`) — **must**
 be a real `<link>`, not a JS-inserted `<style>` tag; see Known rough
 edges for why.
@@ -63,14 +155,19 @@ edges for why.
 ### Status/feedback: three channels, not a status bar
 There used to be a simple status bar; it's gone. `setStatus(text, kind,
 {toast})` in main.js now drives three things at once:
-1. **Titlebar dirty marker** — native OS window title gets a `● ` prefix
-   while dirty (`applyWindowTitleBar`), cleared on save. The window title
-   otherwise reflects the open PDF's own metadata title (XMP `dc:title`,
-   falling back to Info `Title`, falling back to filename) — set via
-   Tauri's window API, not pdf.js's own `setTitle()` (see gotchas).
+1. **Window title** — reflects the open PDF's own metadata title (XMP
+   `dc:title`, falling back to Info `Title`, falling back to filename;
+   `applyWindowTitleBar`/`currentTitleBase`) via Tauri's window API, not
+   pdf.js's own `setTitle()` (see gotchas). Also carries the full
+   absolute path as a native tooltip on hover (`title` attribute on
+   `#titlebarTitle`). No longer carries a `● ` dirty-prefix — removed
+   once the titlebar's own Activity Log button started carrying a
+   color-coded status dot, making a second, redundant dirty indicator
+   unnecessary.
 2. **Activity log** — every single status update, no exceptions, gets a
    timestamped entry (`appendLogEntry`, capped at 200), viewable via the
-   toolbar status dot.
+   titlebar's Activity Log button (color-coded dot:
+   idle/dirty/saving/error/saved).
 3. **Toast** — opt-in per call site (`{ toast: true }`), reserved for
    errors and manual-save confirmations. Most status updates (dirty-
    marking on every edit, "Saving…") fire far too often to pop up a
@@ -179,8 +276,34 @@ reload already, so it renders correctly the first time.
 
 ### Rust side
 Intentionally thin — just wires up the `dialog`, `fs`, and (for the
-titlebar) `core:window:allow-set-title` capabilities. All real logic is
-in the frontend.
+titlebar) `core:window:allow-set-title` capabilities, plus one command
+(`get_launch_path`, see below). All real logic is in the frontend.
+
+### Multiple windows & file-open entry points
+Deliberately **not** a single-instance app, and **not** registered as
+the default PDF viewer — both are intentional choices, not gaps. The
+actual workflow this app is built around (reviewing homework/exam PDFs
+one at a time via Previous/Next, occasionally interrupting to annotate a
+different file) is better served by each file living in its own window
+than by a single-window/single-instance model: interrupting to open
+another file shouldn't lose your place in the one you were already
+reviewing.
+- `tauri.conf.json`'s `bundle.fileAssociations` registers `.pdf` for
+  "Open with" (Explorer's context menu) without claiming the
+  default-viewer role.
+- `src-tauri/src/main.rs`'s `get_launch_path` command reads `argv[1]` —
+  covers "Open with", a plain `pdf-annotator.exe file.pdf` shell
+  invocation, and (once installed) double-clicking a `.pdf` via the file
+  association, all three of which pass the path as the first CLI arg on
+  Windows. `main.js` calls it once at startup
+  (`invoke("get_launch_path").then(...)`) and routes it straight through
+  `openPath()` — same session-snapshot/autosave wiring as every other
+  entry point, landing directly in the viewer rather than the landing
+  screen.
+- A non-PDF path passed this way surfaces as an error on the landing
+  screen rather than failing silently or crashing — verified.
+- `bundle.windows.nsis.installMode: "currentUser"` avoids an elevation
+  prompt for what's fundamentally a personal-workflow tool.
 
 ## Known rough edges / things that have already bitten us
 
@@ -360,6 +483,41 @@ tab or an embedder that replicates browser behavior:
   document right before `PDFViewerApplication.run()` — the intended
   embedding hook for exactly this, avoiding any DOMContentLoaded timing
   race.
+- **Comment popups/markers have their own `color-scheme`, separate from
+  ours, and it doesn't fully solve.** viewer.css scopes `.commentPopup` and
+  `.annotationCommentButton` with their own `color-scheme:light dark`,
+  which makes every `light-dark()` value inside them (text color, marker
+  icon color) resolve against the *OS's* actual dark-mode setting, ignoring
+  whatever single value `applyPdfjsColorScheme()` forces on `<html>` for
+  our light/dark/default toggle — confirmed with an isolated repro. Fixing
+  it needed two layers: (1) `custom-viewer.css` overrides both rules to
+  `color-scheme:var(--app-color-scheme,inherit) !important` — plain
+  `inherit` alone isn't enough, because both elements render *inside*
+  `.annotationLayer`/`.annotationEditorLayer`, which viewer.css *also*
+  forces to `color-scheme:only light`, and `inherit` grabs that nearer
+  ancestor instead of `<html>`; a custom property cascades independently of
+  `color-scheme` itself and skips right past it. (2) `applyPdfjsColorScheme()`
+  must actually run once the iframe has *really* finished loading, not just
+  once at module init right after `frame.src` is assigned (still the
+  placeholder document at that point, so that call silently no-ops) — see
+  `initializeViewer()`'s call to it.
+  A popup's *background* is a separate bug on top of that: it's tinted
+  once via `CSSConstants.commentForegroundColor`, a `shadow()`-memoized
+  getter that's never recomputed after first read — see
+  `refreshPdfjsCommentForegroundColorCache()`'s comment in `main.js` for the
+  fix. **Known remaining gap**: the small marker button drawn directly on a
+  highlight has the exact same memoized-background problem, but its color
+  is applied by a *different*, more private code path (`PopupElement`'s
+  `#updateColor()`, in the plain non-editor annotation-layer rendering —
+  not `AnnotationEditorUIManager`, whose `getEditors()` was confirmed via a
+  live console check to find nothing for these) with no public registry to
+  reach it from outside. Left unfixed: each marker keeps whatever
+  background matched the theme active the first time its page rendered
+  this session, permanently, even across later theme switches. Reopening
+  the document repaints every marker fresh and picks up the current theme.
+  If ever revisited, start by finding how `PopupElement` instances (or
+  their owning `HighlightAnnotationElement`) are reachable from outside —
+  they weren't obviously exposed anywhere during this investigation.
 - The `PDFViewerApplication.open()` argument shape and any other
   Tauri v2 capability/permission identifier strings were originally
   written without being able to run/verify them — if either throws or

@@ -19,7 +19,7 @@ are things that were actually hit and fixed.
   a manual save.
 - **Full pdf.js annotation editors** — highlight, freetext, ink/drawing,
   and comments, all pdf.js's own built-in tooling embedded directly.
-- **Status dot + activity log** — a small toolbar indicator shows
+- **Status dot + activity log** — a small titlebar indicator shows
   idle/dirty/saving/error/saved at a glance; clicking it opens a
   timestamped log of every save/status event.
 - **Undo All** — reverts to the file's state at the start of the current
@@ -34,9 +34,18 @@ are things that were actually hit and fixed.
 - **Overwrite vs. copy on open** — choose whether opening a PDF edits it
   in place or works on an autosaved copy instead, per file, with the
   choice remembered for next time.
-- **Recent files** on the landing screen, and a native window titlebar
-  that shows the PDF's own title metadata plus a `●` marker while there
-  are unsaved changes.
+- **Recent files** on the landing screen, and a custom titlebar (no
+  native OS chrome) that shows the PDF's own title metadata, with the
+  full file path available as a hover tooltip.
+- **Light / Dark / Default theme toggle** — one button cycles the whole
+  app (landing screen, titlebar, and the pdf.js viewer itself) through
+  three themes; Default keeps a dark landing screen with a light
+  document viewer, matching pdf.js's own conventional look.
+- **Multiple windows, not tabs** — opening another file (via the Open
+  button, "Open with", double-clicking a `.pdf`, or a command-line
+  argument) opens it in its own window rather than replacing what
+  you're currently reviewing, so interrupting your place in one
+  document to annotate another never loses it.
 
 ## Setup
 
@@ -60,9 +69,17 @@ are things that were actually hit and fixed.
 
 - `src/index.html` has two screens: a landing screen (Open button +
   recent-files list, shown until a file is open) and a viewer screen
-  (the pdf.js iframe). Opening a file, from either the landing screen or
-  the Open button injected into pdf.js's own toolbar, switches to the
-  viewer.
+  (the pdf.js iframe), both sharing one custom titlebar (the app runs
+  with `decorations:false` — no native OS titlebar at all). Opening a
+  file — from the landing screen, the titlebar's own Open button, "Open
+  with", double-clicking a `.pdf`, or a `pdf-annotator.exe file.pdf`
+  command line — switches to the viewer; Open/Previous/Next/Activity
+  Log/Settings live in the titlebar itself (hidden on the landing
+  screen), not inside pdf.js's own toolbar.
+- This is a multi-window app by design, not single-instance: each file
+  you open gets its own window, matching a "review one document at a
+  time via Previous/Next, occasionally interrupt for another file"
+  workflow better than tabs would.
 - The PDF is read via Tauri's `fs` plugin and handed to
   `PDFViewerApplication.open({ data: bytes })`. Because the iframe is
   served same-origin by Vite/Tauri, `main.js` reaches directly into
@@ -76,13 +93,19 @@ are things that were actually hit and fixed.
 - `pdfDocument.saveDocument()` then bakes the annotations into fresh PDF
   bytes, written to `<file>.autosave.tmp` and renamed over the original —
   write-then-rename so a crash mid-write can't corrupt your file.
-- Status/error feedback has three channels: a `●` marker on the native
-  window title while there are unsaved changes, a colored-dot button in
-  pdf.js's toolbar that opens a full timestamped activity log, and toast
-  notifications for errors and manual-save confirmations.
+- Status/error feedback has three channels: the window title itself, a
+  colored-dot button in the titlebar that opens a full timestamped
+  activity log, and toast notifications for errors and manual-save
+  confirmations.
 - The window title itself reflects the open PDF's own title metadata
-  (falling back to filename) — set directly via Tauri's window API, since
-  pdf.js's own title-setting logic is a no-op when embedded in an iframe.
+  (falling back to filename), with the full path available as a hover
+  tooltip — set directly via Tauri's window API, since pdf.js's own
+  title-setting logic is a no-op when embedded in an iframe.
+- Theming is a single three-way toggle (Default/Light/Dark) that drives
+  the outer chrome via a CSS class swap and the pdf.js viewer itself via
+  a live `color-scheme` property change (no iframe reload needed) — see
+  `CLAUDE.md` for why that alone isn't enough for comment popups/markers
+  specifically.
 
 ## Known rough edges
 
@@ -92,12 +115,19 @@ are things that were actually hit and fixed.
 - **Don't use pdf.js's own "Open File" (Tools menu)** — it's blocked
   outright, because it bypasses this app's file-path tracking in a way
   that would silently corrupt the *previous* file on next autosave. Use
-  the Open button (landing screen or toolbar), Ctrl+O, or drag-and-drop —
+  the Open button (landing screen or titlebar), Ctrl+O, or drag-and-drop —
   all three are intercepted and redirected to the same safe picker path,
   never through pdf.js's own handling.
 - **`saveDocument()` on documents with no annotations** — if a PDF has no
   AcroForm/annotation structures pdf.js can serialize, this may return
   the original bytes unchanged. Expected, not a bug.
+- **A highlight's comment-marker background color can be "stuck" from an
+  earlier theme** — it's set once when that page first renders each
+  session and isn't live-updated on a later theme switch (the comment
+  popup's own text and background, and the rest of the app's chrome, all
+  DO update live — this is specific to the small marker button drawn on
+  the highlight itself). Reopening the document repaints it correctly.
+  See `CLAUDE.md` for the investigation into why.
 - Frontend JS errors don't show up in the terminal running `tauri dev` —
   check the webview's own DevTools (right-click → Inspect Element).
 - See `CLAUDE.md` for the full, more technical list — CSP quirks, Tauri
@@ -111,10 +141,12 @@ are things that were actually hit and fixed.
   change, not yet done.
 - Keep a rolling backup (`file.pdf.bak-<timestamp>`) instead of a single
   `.tmp`, so you can recover from a bad autosave too.
-- Tabs / multiple open documents / split view are all plain frontend
-  concerns (not blocked by Tauri) but would need the current
-  single-document module-level state (`currentPath`, `dirty`, etc.) to
-  become per-document state first — a real refactor.
+- Multiple open documents are handled via separate windows, not tabs —
+  see "Multiple windows, not tabs" above. Tabs/split-view *within* one
+  window would need the current single-document module-level state
+  (`currentPath`, `dirty`, etc.) to become per-document state first — a
+  real refactor — for what would likely be a downgrade for the
+  Previous/Next review workflow this app is built around anyway.
 - If you want cross-device sync later, the autosave path in
   `saveNow()`/`loadPdfIntoViewer()` is the natural place to also push
   bytes to a cloud folder.

@@ -546,12 +546,90 @@ function pdfjsColorSchemeMode() {
 // scheme", mode), where docStyle is document.documentElement.style) — pdf.js
 // only reads the seeded viewerCssTheme preference once, at its own startup,
 // so changing that preference alone wouldn't do anything for a theme change
-// made mid-session without reloading the iframe. The iframe is already warm
-// (loaded in the background behind the landing screen — see
-// initializeViewer's comment) by the time this can ever run, so
-// frame.contentDocument is always the real pdf.js page, never a blank one.
+// made mid-session without reloading the iframe. Every contentWindow?.
+// access below is optional-chained because this runs three times over the
+// app's life: once synchronously at module init (frame.src was just
+// assigned a couple lines up — frame.contentWindow is still the placeholder
+// document, so this call is a deliberate, harmless no-op), once for real
+// once initializeViewer()'s waitForViewer() resolves (see its comment —
+// this is what actually seeds --app-color-scheme etc. for the first time),
+// and then again on every subsequent theme-button click, by which point the
+// iframe has long since been warm.
 function applyPdfjsColorScheme() {
-  frame.contentDocument?.documentElement.style.setProperty("color-scheme", pdfjsColorSchemeMode());
+  const contentWindow = frame.contentWindow;
+  const mode = pdfjsColorSchemeMode();
+  const docStyle = contentWindow?.document.documentElement.style;
+  docStyle?.setProperty("color-scheme", mode);
+  // Also mirrored onto a plain custom property — see custom-viewer.css's
+  // .commentPopup/.annotationCommentButton rule for why `color-scheme`
+  // alone (even via `inherit`) isn't enough for those two.
+  docStyle?.setProperty("--app-color-scheme", mode);
+  refreshPdfjsCommentForegroundColorCache(contentWindow);
+}
+
+// A comment popup's background is tinted to contrast against its
+// highlight's own color (pdf.mjs CommentManager#_makeCommentColor →
+// findContrastColor(highlightColor, CSSConstants.commentForegroundColor)),
+// computed fresh every time a popup opens. But commentForegroundColor
+// itself (also pdf.mjs) is a lazy getter memoized via pdf.js's own shadow()
+// helper (Object.defineProperty, configurable but write-once) the first
+// time anything reads it, and never recomputed after — meaning it's frozen
+// at whatever --comment-fg-color resolved to at that first access, forever,
+// even though the live CSS variable keeps updating with our theme toggle
+// (once custom-viewer.css's `.commentPopup,.annotationCommentButton{color-
+// scheme:var(--app-color-scheme,inherit)}` override is in place — see that
+// file for why the popup TEXT itself needed a separate fix too, not just
+// this cached background).
+// Can't fix the memoization at its source without hand-editing the vendored
+// pdf.mjs (never done, see CLAUDE.md); instead, replicate the getter's own
+// logic and reassign its cached property with a freshly computed value,
+// using only pdf.js's own exported helpers (globalThis.pdfjsLib.getRGB) for
+// the exact same conversion pdf.js itself would use. This corrects every
+// popup opened from this point on; one already open at the moment of the
+// switch was already styled imperatively when it opened, so it still needs
+// a close/reopen to catch up — a much smaller residual gap than the
+// alternative (permanently wrong until the app restarts).
+//
+// KNOWN LIMITATION this does NOT cover: the small comment-marker button
+// drawn directly on a highlight gets its own highlight-tinted background
+// the same way (commentButtonColor → makeCommentColor → this same cache),
+// but unlike the popup it's painted once when its page first renders this
+// session and never revisited — confirmed empirically (three highlights on
+// three pages each permanently kept whatever background matched the theme
+// active the first time that specific page rendered, even ones first
+// rendered *after* a later theme switch). Fixing that would need calling
+// into whichever object owns that specific marker's repaint, and — unlike
+// the popup, which pdf.js's own AnnotationEditorUIManager.getEditors()
+// reaches directly — that object turned out to live behind a private field
+// on pdf.js's plain (non-editor) annotation-layer rendering path
+// (PopupElement's private #updateColor(), reachable only through its
+// public updateEdited() — pdf.mjs, "src/display/annotation_layer.js"
+// section) with no public registry exposed to find *which* instance
+// belongs to which visible marker from outside. Confirmed getEditors()
+// finds nothing for these pages at all — even ones already scrolled to and
+// showing a marker — via a live console check
+// (PDFViewerApplication.pdfViewer._layerProperties.annotationEditorUIManager
+// .getEditors(pageIndex) returned empty everywhere), so this genuinely
+// isn't reachable the way the popup was, not just an unlucky guess.
+// Reopening the document forces every marker to repaint fresh and picks up
+// whatever theme is active at that point.
+function refreshPdfjsCommentForegroundColorCache(contentWindow) {
+  const pdfjsLib = contentWindow?.pdfjsLib;
+  const CSSConstants = pdfjsLib?.CSSConstants;
+  if (!CSSConstants) return;
+  const doc = contentWindow.document;
+  const probe = doc.createElement("span");
+  probe.classList.add("comment", "sidebar");
+  probe.style.cssText = "width:0;height:0;display:none;color:var(--comment-fg-color);";
+  doc.body.append(probe);
+  const { color } = contentWindow.getComputedStyle(probe);
+  probe.remove();
+  Object.defineProperty(CSSConstants, "commentForegroundColor", {
+    value: pdfjsLib.getRGB(color),
+    configurable: true,
+    enumerable: true,
+    writable: false,
+  });
 }
 
 // Recomputes just the titlebar's own light/dark state — kept separate from
@@ -1522,6 +1600,19 @@ async function attachDragDropOpen() {
 // launch; picking a file, from either place, is always an explicit click.
 async function initializeViewer() {
   const app = await waitForViewer();
+  // Re-apply now that the iframe has actually finished loading pdf.js.
+  // applyTheme(currentTheme) already ran once at module init (below), but
+  // that happens synchronously right after frame.src is assigned — long
+  // before this promise resolves — so frame.contentWindow was still the
+  // placeholder document at that point and every contentWindow?.-guarded
+  // line in applyPdfjsColorScheme() silently no-opped. pdf.js's own
+  // initialize() does seed the *plain* color-scheme property correctly on
+  // its own (from the localStorage preference configurePdfjsPreferences()
+  // wrote), but it has no idea our --app-color-scheme custom property
+  // exists, so without this, that property — and the memoized-color-cache
+  // refresh — would stay unset until the user's first manual theme click,
+  // leaving comment popups/markers wrong on a document opened before then.
+  applyPdfjsColorScheme();
   attachCommentSaveHook(app);
   attachUndoRedoHook(app);
   // Call order determines left-to-right toolbar order (each injector

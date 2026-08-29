@@ -86,3 +86,36 @@
   cursor: not-allowed;
   pointer-events: none;
 }
+
+/* ---- Make comment popups/markers follow OUR theme, not the OS's ---------
+ * viewer.css scopes .commentPopup and .annotationCommentButton with their
+ * own `color-scheme:light dark` (see viewer.css ~3195 / ~2757). That
+ * declaration isn't just documentation — every `light-dark()` value used
+ * *inside* those two rules (--comment-fg-color, --comment-button-fg/-bg,
+ * etc.) resolves against it specifically, and "light dark" (both keywords)
+ * means "defer to prefers-color-scheme", ignoring whatever single value
+ * main.js's applyPdfjsColorScheme() forces on <html> to reflect our own
+ * light/dark/default toggle. Net effect: comment text and the little
+ * comment-marker glyph on a highlight both track the OS theme instead of
+ * the app's, independently of our in-app choice — the marker can even end
+ * up an invisible blank square when the OS scheme makes its fg/bg the same
+ * color.
+ *
+ * `color-scheme:inherit` looked like the fix but isn't enough: both
+ * elements render *inside* .annotationLayer/.annotationEditorLayer, which
+ * viewer.css *also* forces to `color-scheme:only light` (~778). inherit
+ * picks up the *nearest* ancestor's forced value, so it grabs that
+ * always-light layer instead of reaching all the way up to <html> —
+ * confirmed with an isolated repro before landing this. A plain custom
+ * property doesn't have this problem: --app-color-scheme cascades
+ * independently of the color-scheme property itself, so it passes straight
+ * through .annotationLayer's override to whatever <html> was actually set
+ * to. main.js's applyPdfjsColorScheme() sets --app-color-scheme on <html>
+ * alongside color-scheme itself, for exactly this reference. (The popup's
+ * *background* is a separate bug with a separate fix — see
+ * refreshPdfjsCommentForegroundColorCache() in main.js — because it's set
+ * imperatively from a memoized color, not from live CSS.) */
+.commentPopup,
+.annotationCommentButton {
+  color-scheme: var(--app-color-scheme, inherit) !important;
+}
