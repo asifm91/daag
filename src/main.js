@@ -1174,18 +1174,23 @@ function hasPrivateUseAreaChar(text) {
 }
 
 // currentTitleBase holds the document part of the title (filename, or the
-// PDF's own title once metadata resolves) separately from the "unsaved"
-// marker, so markDirty()/saveNow() can flip just the marker via
-// applyWindowTitleBar() without needing to know or re-derive the rest.
+// PDF's own title once metadata resolves) — set once per open/metadata
+// resolution, applied via applyWindowTitleBar(). No longer carries an
+// "unsaved changes" marker of its own: that's what the titlebar's Activity
+// Log status dot (see updateStatusIndicator) is for now.
 let currentTitleBase = null;
 
 function applyWindowTitleBar() {
   if (!currentTitleBase) return;
-  const title = `${dirty ? "● " : ""}${currentTitleBase} — PDF Annotator`;
+  const title = `${currentTitleBase} — PDF Annotator`;
   // The custom titlebar's own text is what's actually visible now that
   // decorations are off; setTitle() still matters too — it's what the
   // taskbar/Alt+Tab/Win+Tab show, none of which read our HTML.
   titlebarTitleEl.textContent = title;
+  // The title text itself is just a filename (or the PDF's own metadata
+  // title) — the full path is only a hover away, same idea as the
+  // recent-files list already showing it under each entry's name.
+  titlebarTitleEl.title = currentPath || "";
   getCurrentWindow()
     .setTitle(title)
     .catch((err) => console.error("Could not set window title:", err));
@@ -1814,7 +1819,6 @@ async function attachAnnotationHooks(app) {
 function markDirty() {
   if (suppressDirty) return;
   dirty = true;
-  applyWindowTitleBar();
   setStatus("Unsaved changes…", "dirty");
   scheduleAutosave();
 }
@@ -1860,7 +1864,6 @@ async function saveNow({ force = false } = {}) {
     await rename(tmpPath, currentPath);
 
     dirty = false;
-    applyWindowTitleBar();
     setStatus(`${force ? "Saved" : "Autosaved"} ${new Date().toLocaleTimeString()}`, "", { toast: force });
     return bytes;
   } catch (err) {
