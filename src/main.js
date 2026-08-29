@@ -34,7 +34,24 @@ const MAX_LOG_ENTRIES = 200;
 const COMMENTER_NAME_KEY = "pdfAnnotator.commenterName";
 const OPEN_MODE_KEY = "pdfAnnotator.openMode"; // "overwrite" | "ask" | "copy"
 const COPY_MAPPINGS_KEY = "pdfAnnotator.copyMappings";
+const THEME_KEY = "pdfAnnotator.theme"; // "default" | "light" | "dark"
+const THEME_CYCLE = ["default", "light", "dark"];
 
+// "default" keeps the original look (dark chrome, light pdf.js viewer —
+// matches pdf.js's own default toolbar color); "light"/"dark" force both
+// the outer chrome and the pdf.js viewer uniformly. Validated against
+// THEME_CYCLE in case a future downgrade leaves a stale/unknown value.
+let currentTheme = THEME_CYCLE.includes(localStorage.getItem(THEME_KEY))
+  ? localStorage.getItem(THEME_KEY)
+  : "default";
+
+const bodyEl = document.body;
+const titlebarEl = document.getElementById("titlebar");
+const titlebarTitleEl = document.getElementById("titlebarTitle");
+const titlebarThemeBtn = document.getElementById("titlebarThemeBtn");
+const titlebarMinimizeBtn = document.getElementById("titlebarMinimizeBtn");
+const titlebarMaximizeBtn = document.getElementById("titlebarMaximizeBtn");
+const titlebarCloseBtn = document.getElementById("titlebarCloseBtn");
 const landingScreen = document.getElementById("landingScreen");
 const viewerScreen = document.getElementById("viewerScreen");
 const openBtn = document.getElementById("openBtn");
@@ -387,6 +404,7 @@ function promptContinueOrStartOver(originalPath, copyPath) {
 function showViewer() {
   landingScreen.classList.add("hidden");
   viewerScreen.classList.remove("hidden");
+  updateTitlebarChrome();
 }
 
 // ---- Configuring the embedded pdf.js viewer ----------------------------
@@ -416,6 +434,10 @@ function configurePdfjsPreferences() {
   Object.assign(prefs, {
     enableHighlightFloatingButton: true,
     enableComment: true,
+    // 1 = light, 2 = dark (see pdfjsColorSchemeMode below) — read once by
+    // pdf.js during its own init, before our live docStyle override in
+    // applyPdfjsColorScheme() would have anything to act on yet.
+    viewerCssTheme: currentTheme === "dark" ? 2 : 1,
   });
   localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
 }
@@ -459,6 +481,97 @@ frame.src = "pdfjs/web/viewer.html";
 getCurrentWindow()
   .setTitle("PDF Annotator")
   .catch((err) => console.error("Could not reset window title:", err));
+
+// ---- Custom titlebar: window controls -------------------------------
+// decorations: false in tauri.conf.json means these three buttons are the
+// only way to minimize/maximize/close the window — nothing native left.
+titlebarMinimizeBtn.addEventListener("click", () =>
+  getCurrentWindow()
+    .minimize()
+    .catch((err) => console.error("Could not minimize window:", err))
+);
+titlebarMaximizeBtn.addEventListener("click", () =>
+  getCurrentWindow()
+    .toggleMaximize()
+    .catch((err) => console.error("Could not toggle window maximize state:", err))
+);
+titlebarCloseBtn.addEventListener("click", () =>
+  getCurrentWindow()
+    .close()
+    .catch((err) => console.error("Could not close window:", err))
+);
+
+// The maximize button's icon (and double-clicking the titlebar, and
+// dragging to a screen edge) all change the window's maximized state
+// without going through toggleMaximize() above, so its own click handler
+// can't be the only thing that keeps the icon in sync — re-check after
+// every resize instead, which covers all of those paths uniformly.
+async function syncMaximizeButtonState() {
+  try {
+    const maximized = await getCurrentWindow().isMaximized();
+    titlebarMaximizeBtn.classList.toggle("is-maximized", maximized);
+    titlebarMaximizeBtn.setAttribute("aria-label", maximized ? "Restore" : "Maximize");
+  } catch (err) {
+    console.error("Could not read window maximized state:", err);
+  }
+}
+syncMaximizeButtonState();
+getCurrentWindow().onResized(syncMaximizeButtonState);
+
+// ---- Titlebar theme button: default / light / dark ----------------------
+// "default" is the original look — dark chrome, light pdf.js viewer (pdf.js's
+// own default toolbar color, see the titlebar-light CSS comment above).
+// "light"/"dark" force both the outer chrome (landing screen, dialogs — see
+// the CSS variables at the top of index.html) and the pdf.js viewer to
+// match uniformly. Persisted so it survives a reload/relaunch.
+const THEME_LABELS = {
+  default: "Theme: Default — click for Light",
+  light: "Theme: Light — click for Dark",
+  dark: "Theme: Dark — click for Default",
+};
+
+function pdfjsColorSchemeMode() {
+  return currentTheme === "dark" ? "dark" : "light";
+}
+
+// Live-updates the already-loaded pdf.js page the same way its own
+// initialize() does internally (viewer.mjs: docStyle.setProperty("color-
+// scheme", mode), where docStyle is document.documentElement.style) — pdf.js
+// only reads the seeded viewerCssTheme preference once, at its own startup,
+// so changing that preference alone wouldn't do anything for a theme change
+// made mid-session without reloading the iframe. The iframe is already warm
+// (loaded in the background behind the landing screen — see
+// initializeViewer's comment) by the time this can ever run, so
+// frame.contentDocument is always the real pdf.js page, never a blank one.
+function applyPdfjsColorScheme() {
+  frame.contentDocument?.documentElement.style.setProperty("color-scheme", pdfjsColorSchemeMode());
+}
+
+// Recomputes just the titlebar's own light/dark state — kept separate from
+// applyTheme() because it also needs to rerun on its own whenever the
+// viewer is shown (see showViewer()), independent of any theme change.
+function updateTitlebarChrome() {
+  const viewerIsOpen = !viewerScreen.classList.contains("hidden");
+  const light = currentTheme === "light" || (currentTheme === "default" && viewerIsOpen);
+  titlebarEl.classList.toggle("titlebar-light", light);
+}
+
+function applyTheme(theme) {
+  currentTheme = theme;
+  localStorage.setItem(THEME_KEY, theme);
+  bodyEl.classList.toggle("theme-light", theme === "light");
+  updateTitlebarChrome();
+  applyPdfjsColorScheme();
+  titlebarThemeBtn.dataset.theme = theme;
+  titlebarThemeBtn.title = THEME_LABELS[theme];
+  titlebarThemeBtn.setAttribute("aria-label", THEME_LABELS[theme]);
+}
+
+titlebarThemeBtn.addEventListener("click", () => {
+  applyTheme(THEME_CYCLE[(THEME_CYCLE.indexOf(currentTheme) + 1) % THEME_CYCLE.length]);
+});
+
+applyTheme(currentTheme);
 
 // ---- Ctrl+W: same reload Ctrl+R/F5 already do natively -------------------
 // Ctrl+R/F5 aren't ours — they're WebView2's own reload accelerator,
@@ -1208,8 +1321,13 @@ let currentTitleBase = null;
 
 function applyWindowTitleBar() {
   if (!currentTitleBase) return;
+  const title = `${dirty ? "● " : ""}${currentTitleBase} — PDF Annotator`;
+  // The custom titlebar's own text is what's actually visible now that
+  // decorations are off; setTitle() still matters too — it's what the
+  // taskbar/Alt+Tab/Win+Tab show, none of which read our HTML.
+  titlebarTitleEl.textContent = title;
   getCurrentWindow()
-    .setTitle(`${dirty ? "● " : ""}${currentTitleBase} — PDF Annotator`)
+    .setTitle(title)
     .catch((err) => console.error("Could not set window title:", err));
 }
 

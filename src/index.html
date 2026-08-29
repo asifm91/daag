@@ -4,17 +4,88 @@
     <meta charset="utf-8" />
     <title>PDF Annotator</title>
     <style>
-      html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; background: #2b2b2b; color: #eee; }
+      /* ---- Theme variables: dark is the default/base palette; the
+         "light" app theme (see the titlebar theme button in main.js)
+         overrides them under body.theme-light. The "dark" app theme reuses
+         these same base values unchanged — dark chrome is already the
+         default, so only the pdf.js viewer's own color-scheme (set live
+         from main.js) differs between "default" and "dark". ---- */
+      :root {
+        --bg: #2b2b2b;
+        --fg: #eee;
+        --fg-muted: #888;
+        --surface: #3a3a3a;
+        --surface-hover: #474747;
+        --surface-2: #262626;
+        --border: #3a3a3a;
+        --border-strong: #555;
+        --input-bg: #1c1c1c;
+        --overlay: rgba(0, 0, 0, 0.5);
+        --danger-text: #ffb3b3;
+        --drag-active-bg: #253247;
+        --drag-invalid-bg: #3a2b2b;
+      }
+      body.theme-light {
+        --bg: #f4f4f5;
+        --fg: #1c1c1e;
+        --fg-muted: #6b6b70;
+        --surface: #e4e4e6;
+        --surface-hover: #d4d4d7;
+        --surface-2: #ffffff;
+        --border: #d8d8db;
+        --border-strong: #bcbcc0;
+        --input-bg: #ffffff;
+        --overlay: rgba(0, 0, 0, 0.25);
+        --danger-text: #b02a2a;
+        --drag-active-bg: #dce7f7;
+        --drag-invalid-bg: #f6dede;
+      }
+
+      html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); overflow: hidden; }
+      body { display: flex; flex-direction: column; color-scheme: dark; }
+      body.theme-light { color-scheme: light; }
       .hidden { display: none !important; }
 
-      button { background: #3a3a3a; color: #eee; border: 1px solid #555; border-radius: 4px; cursor: pointer; }
-      button:hover { background: #474747; }
+      button { background: var(--surface); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; cursor: pointer; }
+      button:hover { background: var(--surface-hover); }
       button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+      /* ---- Custom titlebar: decorations are off (tauri.conf.json), so this
+         is the only window chrome there is. Deliberately NOT keyed off the
+         --bg/--fg vars above: its own light/dark state depends on whether
+         a PDF is open (matching pdf.js's own toolbar color) as well as the
+         app theme — see updateTitlebarChrome() in main.js. ---- */
+      #titlebar { flex: 0 0 auto; height: 32px; display: flex; align-items: stretch; background: #1f1f1f; user-select: none; -webkit-user-select: none; }
+      #titlebarTitle { flex: 1; display: flex; align-items: center; padding-left: 12px; font-size: 12px; color: #aaa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #titlebarControls { flex: 0 0 auto; display: flex; }
+      .titlebarButton { flex: 0 0 auto; width: 46px; height: 100%; display: flex; align-items: center; justify-content: center; background: none; border: none; border-radius: 0; padding: 0; color: #ccc; }
+      .titlebarButton:hover { background: #3a3a3a; }
+      .titlebarButton svg { width: 10px; height: 10px; stroke: currentColor; stroke-width: 1; fill: none; }
+      .titlebarButton .icon-restore,
+      .titlebarButton .icon-theme-light,
+      .titlebarButton .icon-theme-dark { display: none; }
+      .titlebarButton.is-maximized .icon-maximize { display: none; }
+      .titlebarButton.is-maximized .icon-restore { display: block; }
+      #titlebarThemeBtn[data-theme="light"] .icon-theme-default { display: none; }
+      #titlebarThemeBtn[data-theme="light"] .icon-theme-light { display: block; }
+      #titlebarThemeBtn[data-theme="dark"] .icon-theme-default { display: none; }
+      #titlebarThemeBtn[data-theme="dark"] .icon-theme-dark { display: block; }
+      #titlebarCloseBtn:hover { background: #e81123; color: #fff; }
+      /* pdf.js's own toolbar is light by default (--toolbar-bg-color:
+         rgb(249 249 250) in viewer.css) — once a PDF is open (in the
+         default app theme) or the app theme is forced light, match it here
+         too so the titlebar doesn't sit as a dark stripe directly above a
+         light toolbar. Toggled in updateTitlebarChrome() (main.js). */
+      #titlebar.titlebar-light { background: #f9f9fa; }
+      #titlebar.titlebar-light #titlebarTitle { color: #5a5a5c; }
+      #titlebar.titlebar-light .titlebarButton { color: #3a3a3c; }
+      #titlebar.titlebar-light .titlebarButton:hover { background: #e5e5e7; }
+      #titlebar.titlebar-light #titlebarCloseBtn:hover { background: #e81123; color: #fff; }
+
       /* ---- Landing screen: shown until a file is open ---- */
-      #landingScreen { position: relative; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; box-sizing: border-box; padding: 24px; transition: background-color 0.15s ease; }
-      #landingScreen.drag-active { background-color: #253247; }
-      #landingScreen.drag-invalid { background-color: #3a2b2b; }
+      #landingScreen { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; box-sizing: border-box; padding: 24px; transition: background-color 0.15s ease; }
+      #landingScreen.drag-active { background-color: var(--drag-active-bg); }
+      #landingScreen.drag-invalid { background-color: var(--drag-invalid-bg); }
       #landingScreen.drag-active::after,
       #landingScreen.drag-invalid::after {
         content: "";
@@ -27,98 +98,142 @@
       #landingScreen.drag-active::after { border: 4px dashed #6ca0e0; animation: drag-pulse 2.6s ease-in-out infinite; }
       #landingScreen.drag-invalid::after { border: 4px dashed #e06c6c; opacity: 0.6; }
       @keyframes drag-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
-      #landingScreen h1 { font-size: 18px; font-weight: 500; color: #bbb; margin: 0; }
+      #landingScreen h1 { font-size: 18px; font-weight: 500; color: var(--fg-muted); margin: 0; }
       #landingActions { display: flex; align-items: center; gap: 10px; }
       #openBtn { padding: 10px 22px; font-size: 14px; }
       #landingSettingsBtn { width: 40px; height: 40px; padding: 0; font-size: 18px; line-height: 1; display: flex; align-items: center; justify-content: center; }
       #landingOpenModeWarning { margin: 0; font-size: 12px; color: #e0c46c; text-align: center; }
       #recentFilesPanel { width: min(480px, 100%); animation: recent-files-in 0.2s ease-out; }
       @keyframes recent-files-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-      #recentFilesPanel h2 { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; color: #888; margin: 0 0 8px; }
-      #recentFilesList { list-style: none; margin: 0; padding: 0; border: 1px solid #3a3a3a; border-radius: 6px; overflow: hidden; }
-      #recentFilesList li { border-bottom: 1px solid #3a3a3a; }
+      #recentFilesPanel h2 { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-muted); margin: 0 0 8px; }
+      #recentFilesList { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+      #recentFilesList li { border-bottom: 1px solid var(--border); }
       #recentFilesList li:last-child { border-bottom: none; }
-      #recentFilesList button { display: block; width: 100%; box-sizing: border-box; text-align: left; background: none; border: none; border-radius: 0; color: #ddd; padding: 10px 14px; font-size: 13px; }
-      #recentFilesList button:hover { background: #363636; }
+      #recentFilesList button { display: block; width: 100%; box-sizing: border-box; text-align: left; background: none; border: none; border-radius: 0; color: var(--fg); padding: 10px 14px; font-size: 13px; }
+      #recentFilesList button:hover { background: var(--surface-hover); }
       #recentFilesList .recentFileRow { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
       #recentFilesList .recentFileName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      #recentFilesList .recentFileMeta { flex-shrink: 0; font-size: 11px; color: #888; }
-      #recentFilesList .recentFilePath { display: block; margin-top: 2px; font-size: 11px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      #recentFilesEmpty { color: #777; font-size: 13px; padding: 10px 14px; }
+      #recentFilesList .recentFileMeta { flex-shrink: 0; font-size: 11px; color: var(--fg-muted); }
+      #recentFilesList .recentFilePath { display: block; margin-top: 2px; font-size: 11px; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #recentFilesEmpty { color: var(--fg-muted); font-size: 13px; padding: 10px 14px; }
       #landingStatus { min-height: 1em; font-size: 13px; }
       #landingStatus.error { color: #e06c6c; }
 
       /* ---- Viewer screen: shown once a file is open ---- */
-      #viewerScreen { height: 100%; }
-      #viewerFrame { width: 100%; height: 100%; border: none; background: #525659; }
+      #viewerScreen { flex: 1 1 auto; min-height: 0; }
+      #viewerFrame { display: block; width: 100%; height: 100%; border: none; background: #525659; }
 
       /* ---- Toast notifications: transient, for confirmations/errors ---- */
       #toastContainer { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column-reverse; gap: 8px; z-index: 1000; pointer-events: none; }
-      .toast { background: #333; border: 1px solid #555; border-radius: 6px; padding: 10px 14px; font-size: 13px; color: #eee; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); max-width: 360px; pointer-events: auto; cursor: pointer; animation: toast-in 0.15s ease-out; }
-      .toast.error { border-color: #e06c6c; color: #ffc2c2; }
+      .toast { background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 6px; padding: 10px 14px; font-size: 13px; color: var(--fg); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); max-width: 360px; pointer-events: auto; cursor: pointer; animation: toast-in 0.15s ease-out; }
+      .toast.error { border-color: #e06c6c; color: var(--danger-text); }
       @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
       /* ---- Activity log: full history, opened from the toolbar dot ---- */
-      #logDialog { background: #262626; color: #eee; border: 1px solid #444; border-radius: 8px; padding: 0; width: min(560px, 90vw); }
-      #logDialog::backdrop { background: rgba(0, 0, 0, 0.5); }
-      #logDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #3a3a3a; }
+      #logDialog { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 0; width: min(560px, 90vw); }
+      #logDialog::backdrop { background: var(--overlay); }
+      #logDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); }
       #logDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
       #logDialogCloseButton { padding: 4px 10px; font-size: 13px; }
       #logList { list-style: none; margin: 0; padding: 8px 16px; overflow-y: auto; max-height: min(60vh, 420px); font-size: 12px; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
-      #logList li { padding: 4px 0; border-bottom: 1px solid #333; }
+      #logList li { padding: 4px 0; border-bottom: 1px solid var(--border); }
       #logList li:last-child { border-bottom: none; }
-      #logList li.error { color: #ffb3b3; }
-      #logList .log-time { color: #888; margin-right: 8px; }
+      #logList li.error { color: var(--danger-text); }
+      #logList .log-time { color: var(--fg-muted); margin-right: 8px; }
 
       /* ---- Settings: global commenter name, opened from the toolbar ---- */
-      #settingsDialog { background: #262626; color: #eee; border: 1px solid #444; border-radius: 8px; padding: 0; width: min(360px, 90vw); }
-      #settingsDialog::backdrop { background: rgba(0, 0, 0, 0.5); }
-      #settingsDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #3a3a3a; }
+      #settingsDialog { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 0; width: min(360px, 90vw); }
+      #settingsDialog::backdrop { background: var(--overlay); }
+      #settingsDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); }
       #settingsDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
       #settingsDialogBody { padding: 16px; }
-      #settingsDialogBody label { display: block; font-size: 12px; color: #aaa; margin-bottom: 6px; }
+      #settingsDialogBody label { display: block; font-size: 12px; color: var(--fg-muted); margin-bottom: 6px; }
       #settingsDialogBody label:not(:first-child) { margin-top: 14px; }
-      #commenterNameInput, #openModeSelect { width: 100%; box-sizing: border-box; background: #1c1c1c; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 7px 9px; font-size: 13px; }
-      #settingsDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid #3a3a3a; }
+      #commenterNameInput, #openModeSelect { width: 100%; box-sizing: border-box; background: var(--input-bg); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; padding: 7px 9px; font-size: 13px; }
+      #settingsDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
       #settingsDialogFooter button { padding: 6px 14px; font-size: 13px; }
 
       /* ---- Overwrite-or-copy prompt: shown on open when Settings is set to "Ask each time" ---- */
-      #overwriteCopyDialog { background: #262626; color: #eee; border: 1px solid #444; border-radius: 8px; padding: 0; width: min(460px, 90vw); }
-      #overwriteCopyDialog::backdrop { background: rgba(0, 0, 0, 0.5); }
-      #overwriteCopyDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #3a3a3a; }
+      #overwriteCopyDialog { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 0; width: min(460px, 90vw); }
+      #overwriteCopyDialog::backdrop { background: var(--overlay); }
+      #overwriteCopyDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); }
       #overwriteCopyDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
-      #overwriteCopyDialogBody { padding: 16px; font-size: 13px; color: #ccc; line-height: 1.5; }
-      #overwriteCopyDialogPath { font-size: 12px; color: #888; word-break: break-all; margin: 8px 0 0; }
+      #overwriteCopyDialogBody { padding: 16px; font-size: 13px; color: var(--fg); line-height: 1.5; }
+      #overwriteCopyDialogPath { font-size: 12px; color: var(--fg-muted); word-break: break-all; margin: 8px 0 0; }
       #overwriteCopyDialogRememberLabel { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; cursor: pointer; }
       #overwriteCopyDialogRememberLabel input { margin-top: 2px; accent-color: #888; }
-      #overwriteCopyDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid #3a3a3a; flex-wrap: wrap; }
+      #overwriteCopyDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); flex-wrap: wrap; }
       #overwriteCopyDialogFooter button { padding: 6px 14px; font-size: 13px; }
 
       /* ---- Continue-with-copy-or-start-over: shown on open when the original has a remembered copy ---- */
-      #continueOrStartOverDialog { background: #262626; color: #eee; border: 1px solid #444; border-radius: 8px; padding: 0; width: min(460px, 90vw); }
-      #continueOrStartOverDialog::backdrop { background: rgba(0, 0, 0, 0.5); }
-      #continueOrStartOverDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #3a3a3a; }
+      #continueOrStartOverDialog { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 0; width: min(460px, 90vw); }
+      #continueOrStartOverDialog::backdrop { background: var(--overlay); }
+      #continueOrStartOverDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); }
       #continueOrStartOverDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
-      #continueOrStartOverDialogBody { padding: 16px; font-size: 13px; color: #ccc; line-height: 1.5; }
-      #continueOrStartOverDialogPath { font-size: 12px; color: #888; word-break: break-all; margin: 8px 0 0; }
-      #continueOrStartOverDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid #3a3a3a; flex-wrap: wrap; }
+      #continueOrStartOverDialogBody { padding: 16px; font-size: 13px; color: var(--fg); line-height: 1.5; }
+      #continueOrStartOverDialogPath { font-size: 12px; color: var(--fg-muted); word-break: break-all; margin: 8px 0 0; }
+      #continueOrStartOverDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); flex-wrap: wrap; }
       #continueOrStartOverDialogFooter button { padding: 6px 14px; font-size: 13px; }
 
       /* ---- Undo All confirmation: destructive, so a confirm step gates it ---- */
-      #undoAllDialog { background: #262626; color: #eee; border: 1px solid #444; border-radius: 8px; padding: 0; width: min(400px, 90vw); }
-      #undoAllDialog::backdrop { background: rgba(0, 0, 0, 0.5); }
-      #undoAllDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #3a3a3a; }
+      #undoAllDialog { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 0; width: min(400px, 90vw); }
+      #undoAllDialog::backdrop { background: var(--overlay); }
+      #undoAllDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); }
       #undoAllDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
-      #undoAllDialogBody { padding: 16px; font-size: 13px; color: #ccc; line-height: 1.5; }
+      #undoAllDialogBody { padding: 16px; font-size: 13px; color: var(--fg); line-height: 1.5; }
       #undoAllStripAllLabel { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; cursor: pointer; }
       #undoAllStripAllLabel input { margin-top: 2px; accent-color: #a33d3d; }
-      #undoAllDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid #3a3a3a; }
+      #undoAllDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
       #undoAllDialogFooter button { padding: 6px 14px; font-size: 13px; }
       #undoAllDialogConfirmButton { background: #6b2b2b; border-color: #a33d3d; }
       #undoAllDialogConfirmButton:hover { background: #7e3232; }
     </style>
   </head>
   <body>
+    <!-- Only window chrome there is — decorations are off in tauri.conf.json
+         (see the custom-titlebar block in main.js). The bar itself and the
+         title span are draggable (data-tauri-drag-region); the buttons
+         deliberately are not, since Tauri only starts a drag when the
+         mousedown's own target carries the attribute, not an ancestor's. -->
+    <div id="titlebar" data-tauri-drag-region>
+      <span id="titlebarTitle" data-tauri-drag-region>PDF Annotator</span>
+      <div id="titlebarControls">
+        <button id="titlebarThemeBtn" class="titlebarButton" type="button" data-theme="default">
+          <svg class="icon-theme-default" viewBox="0 0 10 10">
+            <circle cx="5" cy="5" r="4" />
+            <path d="M5 1 A4 4 0 0 1 5 9 Z" fill="currentColor" stroke="none" />
+          </svg>
+          <svg class="icon-theme-light" viewBox="0 0 10 10">
+            <circle cx="5" cy="5" r="2.3" />
+            <line x1="5" y1="0.4" x2="5" y2="1.6" />
+            <line x1="5" y1="8.4" x2="5" y2="9.6" />
+            <line x1="0.4" y1="5" x2="1.6" y2="5" />
+            <line x1="8.4" y1="5" x2="9.6" y2="5" />
+            <line x1="1.9" y1="1.9" x2="2.7" y2="2.7" />
+            <line x1="7.3" y1="7.3" x2="8.1" y2="8.1" />
+            <line x1="1.9" y1="8.1" x2="2.7" y2="7.3" />
+            <line x1="7.3" y1="2.7" x2="8.1" y2="1.9" />
+          </svg>
+          <svg class="icon-theme-dark" viewBox="0 0 10 10">
+            <path d="M7 1.2a4 4 0 1 0 1.8 7.6A4.6 4.6 0 0 1 7 1.2Z" />
+          </svg>
+        </button>
+        <button id="titlebarMinimizeBtn" class="titlebarButton" type="button" aria-label="Minimize">
+          <svg viewBox="0 0 10 10"><line x1="0" y1="5" x2="10" y2="5" /></svg>
+        </button>
+        <button id="titlebarMaximizeBtn" class="titlebarButton" type="button" aria-label="Maximize">
+          <svg class="icon-maximize" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" /></svg>
+          <svg class="icon-restore" viewBox="0 0 10 10">
+            <rect x="0.5" y="2.5" width="7" height="7" />
+            <path d="M2.5 2.5V0.5H9.5V7.5H7.5" />
+          </svg>
+        </button>
+        <button id="titlebarCloseBtn" class="titlebarButton" type="button" aria-label="Close">
+          <svg viewBox="0 0 10 10"><line x1="0" y1="0" x2="10" y2="10" /><line x1="10" y1="0" x2="0" y2="10" /></svg>
+        </button>
+      </div>
+    </div>
+
     <!-- Shown until a file is open — see showViewer() in main.js -->
     <div id="landingScreen">
       <h1>PDF Annotator</h1>
