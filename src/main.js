@@ -1227,7 +1227,7 @@ function updateWindowTitle(app, path) {
       const pdfTitle =
         xmpTitle && xmpTitle !== "Untitled" && !hasPrivateUseAreaChar(xmpTitle) ? xmpTitle : info?.Title;
       if (pdfTitle) {
-        currentTitleBase = pdfTitle;
+        currentTitleBase = `${pdfTitle} (${currentTitleBase})`;
         applyWindowTitleBar();
       }
     })
