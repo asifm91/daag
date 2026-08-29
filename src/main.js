@@ -874,7 +874,7 @@ function injectSettingsButton() {
   button.id = "customSettingsButton";
   button.className = "toolbarButton";
   button.type = "button";
-  button.title = "Settings — commenter name";
+  button.title = "Settings";
   button.addEventListener("click", openSettingsDialog);
 
   const label = doc.createElement("span");
