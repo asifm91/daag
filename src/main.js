@@ -271,7 +271,7 @@ undoAllDialogConfirmButtonEl.addEventListener("click", () => {
   undoAllDialogEl.close();
   revertToSessionStart({ stripAllAnnotationsToo }).catch((err) => {
     console.error("Undo All failed:", err);
-    reportError("Undo All failed — see console");
+    reportError("Undo All failed");
   });
 });
 undoAllDialogCancelButtonEl.addEventListener("click", () => undoAllDialogEl.close());
@@ -611,7 +611,7 @@ function injectOpenButton() {
   button.addEventListener("click", () =>
     pickAndOpenPdf().catch((err) => {
       console.error(err);
-      reportError("Failed to open file — see console");
+      reportError("Failed to open file");
     })
   );
 
@@ -653,7 +653,7 @@ function injectPrevButton() {
   button.addEventListener("click", () =>
     navigateFolder(-1).catch((err) => {
       console.error(err);
-      reportError("Failed to open previous file — see console");
+      reportError("Failed to open previous file");
     })
   );
 
@@ -687,7 +687,7 @@ function injectNextButton() {
   button.addEventListener("click", () =>
     navigateFolder(1).catch((err) => {
       console.error(err);
-      reportError("Failed to open next file — see console");
+      reportError("Failed to open next file");
     })
   );
 
@@ -834,7 +834,7 @@ function injectExportCommentsButton() {
   button.addEventListener("click", () =>
     exportComments().catch((err) => {
       console.error(err);
-      setStatus("Export comments failed — see console", "error", { toast: true });
+      setStatus("Export comments failed", "error", { toast: true });
     })
   );
 
@@ -913,7 +913,7 @@ function blockInternalFileOpen(doc) {
       event.stopPropagation();
       pickAndOpenPdf().catch((err) => {
         console.error(err);
-        reportError("Failed to open file — see console");
+        reportError("Failed to open file");
       });
     },
     { capture: true }
@@ -1154,7 +1154,7 @@ function renderRecentFiles() {
     button.addEventListener("click", () => {
       openPath(path).catch((err) => {
         console.error(err);
-        reportError("Failed to open file — see console");
+        reportError("Failed to open file");
       });
     });
     li.appendChild(button);
@@ -1453,7 +1453,7 @@ async function openPath(path) {
       renderRecentFiles();
       reportError(`Could not open ${filenameFromPath(path)} — it may have moved or been deleted`);
     } else {
-      reportError(`Could not open ${filenameFromPath(path)} — see console`);
+      reportError(`Could not open ${filenameFromPath(path)}`);
     }
   } finally {
     release();
@@ -1517,7 +1517,7 @@ async function attachDragDropOpen() {
     openPath(path)
       .catch((err) => {
         console.error(err);
-        reportError("Failed to open file — see console");
+        reportError("Failed to open file");
       })
       .finally(() => {
         dropInFlight = false;
@@ -1572,6 +1572,18 @@ renderRecentFiles();
 updateLandingOpenModeWarning();
 
 initializeViewer();
+
+// ---- Open a file passed on the command line ------------------------------
+// Covers double-clicking a PDF (once file associations are registered by
+// an installed build — see tauri.conf.json's bundle.fileAssociations),
+// "Open with" from Explorer's context menu, and a plain
+// `pdf-annotator.exe file.pdf` shell invocation — Windows passes the path
+// as argv[1] in all three cases. Routed through openPath(), same as every
+// other entry point, so it goes straight to the viewer (skipping the
+// landing screen) and gets the same session-snapshot/autosave wiring.
+invoke("get_launch_path").then((path) => {
+  if (path) openPath(path);
+});
 
 // ---- Hooking comment edits for autosave --------------------------------
 // pdf.js's comment-popup Save button (web/viewer.mjs CommentDialog#save)
@@ -1881,7 +1893,7 @@ async function saveNow({ force = false } = {}) {
     return bytes;
   } catch (err) {
     console.error("Autosave failed:", err);
-    setStatus("Autosave failed — see console", "error", { toast: true });
+    setStatus("Autosave failed", "error", { toast: true });
     // Keep `dirty` true so the next edit or manual Save retries.
     return undefined;
   } finally {
@@ -2179,7 +2191,7 @@ setInterval(() => {
 // ---- Wiring up buttons --------------------------------------------------
 openBtn.addEventListener("click", () => pickAndOpenPdf().catch((err) => {
   console.error(err);
-  reportError("Failed to open file — see console");
+  reportError("Failed to open file");
 }));
 landingSettingsBtn.addEventListener("click", openSettingsDialog);
 
