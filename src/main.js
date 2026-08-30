@@ -302,7 +302,7 @@ async function refreshLongPathStatus() {
       { showButton: true },
     );
   } else if (localStorage.getItem(LONG_PATH_RESTART_PENDING_KEY)) {
-    setLongPathStatus("Enabled — restart PDF Annotator to apply.", "ok", { showButton: false });
+    setLongPathStatus("Enabled — restart দাগ to apply.", "ok", { showButton: false });
   } else {
     setLongPathStatus("Enabled.", "ok", { showButton: false });
   }
@@ -563,9 +563,9 @@ frame.src = "pdfjs/web/viewer.html";
 // just keeps showing whichever document was open beforehand. Reset it back
 // to the app's own default here, at startup, before any file has a chance
 // to be opened. Idempotent on a genuine fresh launch too, since
-// tauri.conf.json's configured window title is already "PDF Annotator".
+// tauri.conf.json's configured window title is already "দাগ — Daag".
 getCurrentWindow()
-  .setTitle("PDF Annotator")
+  .setTitle("দাগ — Daag")
   .catch((err) => console.error("Could not reset window title:", err));
 
 // ---- Custom titlebar: window controls -------------------------------
@@ -1339,7 +1339,7 @@ let currentTitleBase = null;
 
 function applyWindowTitleBar() {
   if (!currentTitleBase) return;
-  const title = `${currentTitleBase} — PDF Annotator`;
+  const title = `${currentTitleBase} — দাগ`;
   // The custom titlebar's own text is what's actually visible now that
   // decorations are off; setTitle() still matters too — it's what the
   // taskbar/Alt+Tab/Win+Tab show, none of which read our HTML.
@@ -1734,7 +1734,7 @@ initializeViewer();
 // Covers double-clicking a PDF (once file associations are registered by
 // an installed build — see tauri.conf.json's bundle.fileAssociations),
 // "Open with" from Explorer's context menu, and a plain
-// `pdf-annotator.exe file.pdf` shell invocation — Windows passes the path
+// `daag.exe file.pdf` shell invocation — Windows passes the path
 // as argv[1] in all three cases. Routed through openPath(), same as every
 // other entry point, so it goes straight to the viewer (skipping the
 // landing screen) and gets the same session-snapshot/autosave wiring.

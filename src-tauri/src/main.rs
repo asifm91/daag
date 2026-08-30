@@ -12,7 +12,7 @@
 //     Windows for every session) and hands it back as the default for
 //     the global "commenter name" setting.
 //   - get_launch_path: when the app is launched by double-clicking a
-//     PDF, via the "Open with" context menu, or as `pdf-annotator.exe
+//     PDF, via the "Open with" context menu, or as `daag.exe
 //     file.pdf` from a shell, Windows passes the file path as the first
 //     command-line argument. There's deliberately no single-instance
 //     handling (see tauri-plugin-single-instance) — each launch is a
@@ -163,5 +163,5 @@ fn main() {
             open_external
         ])
         .run(tauri::generate_context!())
-        .expect("error while running pdf-annotator");
+        .expect("error while running Daag");
 }

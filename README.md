@@ -1,4 +1,4 @@
-# PDF Annotator
+# Daag
 
 A local-first PDF annotator built on Tauri + pdf.js: open a PDF, annotate
 it using pdf.js's own built-in annotation editors (highlight, freetext,
@@ -72,7 +72,7 @@ are things that were actually hit and fixed.
   (the pdf.js iframe), both sharing one custom titlebar (the app runs
   with `decorations:false` — no native OS titlebar at all). Opening a
   file — from the landing screen, the titlebar's own Open button, "Open
-  with", double-clicking a `.pdf`, or a `pdf-annotator.exe file.pdf`
+  with", double-clicking a `.pdf`, or a `daag.exe file.pdf`
   command line — switches to the viewer; Open/Previous/Next/Activity
   Log/Settings live in the titlebar itself (hidden on the landing
   screen), not inside pdf.js's own toolbar.

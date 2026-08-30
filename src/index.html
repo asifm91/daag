@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>PDF Annotator</title>
+    <title>দাগ — Daag</title>
     <style>
       /* ---- Theme variables: dark is the default/base palette; the
          "light" app theme (see the titlebar theme button in main.js)
@@ -119,7 +119,9 @@
       #landingScreen.drag-active::after { border: 4px dashed #6ca0e0; animation: drag-pulse 2.6s ease-in-out infinite; }
       #landingScreen.drag-invalid::after { border: 4px dashed #e06c6c; opacity: 0.6; }
       @keyframes drag-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
-      #landingScreen h1 { font-size: 18px; font-weight: 500; color: var(--fg-muted); margin: 0; }
+      #landingBrand { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+      #landingScreen h1 { font-size: 18px; font-weight: 500; color: var(--fg); margin: 0; }
+      #landingSubtitle { margin: 0; font-size: 13px; color: var(--fg-muted); }
       #landingActions { display: flex; align-items: center; gap: 10px; }
       #openBtn { padding: 10px 22px; font-size: 14px; }
       #landingSettingsBtn { width: 40px; height: 40px; padding: 0; font-size: 18px; line-height: 1; display: flex; align-items: center; justify-content: center; }
@@ -227,7 +229,7 @@
          deliberately are not, since Tauri only starts a drag when the
          mousedown's own target carries the attribute, not an ancestor's. -->
     <div id="titlebar" data-tauri-drag-region>
-      <span id="titlebarTitle" data-tauri-drag-region>PDF Annotator</span>
+      <span id="titlebarTitle" data-tauri-drag-region>দাগ — Daag</span>
       <!-- Hidden until a file is open (see showViewer() in main.js) — the
            landing screen has its own Open/Settings buttons already
            (#openBtn/#landingSettingsBtn below), so these would be
@@ -303,7 +305,10 @@
 
     <!-- Shown until a file is open — see showViewer() in main.js -->
     <div id="landingScreen">
-      <h1>PDF Annotator</h1>
+      <div id="landingBrand">
+        <h1>দাগ — Daag</h1>
+        <p id="landingSubtitle">Hassle-free PDF annotation</p>
+      </div>
       <div id="landingActions">
         <button id="openBtn">Open PDF…</button>
         <button id="landingSettingsBtn" title="Settings" aria-label="Settings">⚙</button>
@@ -377,7 +382,7 @@
           <p id="longPathHelp" class="settings-help">
             Required to open PDFs whose full path is longer than 260 characters by
             drag-and-drop. Enabling changes a system-wide Windows setting, so
-            Windows asks for administrator approval, and PDF Annotator must be
+            Windows asks for administrator approval, and দাগ must be
             restarted afterward for it to take effect.
             <a id="longPathDocLink" href="#">Learn how to enable it manually</a>
           </p>

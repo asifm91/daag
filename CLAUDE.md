@@ -1,4 +1,4 @@
-# PDF Annotator — Claude Code context
+# Daag (PDF Annotator) — Claude Code context
 
 ## What this is
 A local-first Tauri desktop app for annotating PDFs, built to solve a
@@ -340,7 +340,7 @@ reviewing.
   "Open with" (Explorer's context menu) without claiming the
   default-viewer role.
 - `src-tauri/src/main.rs`'s `get_launch_path` command reads `argv[1]` —
-  covers "Open with", a plain `pdf-annotator.exe file.pdf` shell
+  covers "Open with", a plain `daag.exe file.pdf` shell
   invocation, and (once installed) double-clicking a `.pdf` via the file
   association, all three of which pass the path as the first CLI arg on
   Windows. `main.js` calls it once at startup
