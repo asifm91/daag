@@ -7,6 +7,8 @@ original file every few seconds — so a sleep/wake tab reload (the
 original motivation: Firefox's built-in PDF viewer loses everything on
 that) can never wipe your work again.
 
+**Website:** https://asifm91.github.io/daag/ — source in [`docs/`](docs/).
+
 Primarily a Windows app — developed and used on native Windows, which is
 the only platform it's actually been tested on. It's *meant* to build
 and run on Linux and macOS too (the few Windows-only bits — the
