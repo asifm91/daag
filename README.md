@@ -7,7 +7,10 @@ original file every few seconds — so a sleep/wake tab reload (the
 original motivation: Firefox's built-in PDF viewer loses everything on
 that) can never wipe your work again.
 
-Runs on native Windows. Built and run interactively throughout
+Primarily a Windows app — developed and used on native Windows — but it
+also builds and runs on Linux and macOS, with the few Windows-only bits
+(the long-path setting, opening help links in a browser) degrading
+gracefully elsewhere. Built and run interactively throughout
 development — this isn't a from-a-spec skeleton, the rough edges below
 are things that were actually hit and fixed.
 
@@ -64,6 +67,22 @@ are things that were actually hit and fixed.
    can trace. (Already vendored/committed in this repo — only needed if
    you're setting this up somewhere without that history.)
 4. `bun run tauri dev`
+
+## Releases
+
+Prebuilt binaries come from the `Release` GitHub Actions workflow
+(`.github/workflows/release.yml`), which runs on manual dispatch or when
+a `v*` tag is pushed — never on an ordinary push:
+
+- **Windows** — NSIS installer plus a standalone portable `.exe`
+- **Linux** — AppImage
+- **macOS** — universal (Intel + Apple Silicon) `.dmg`
+
+The builds are unsigned, so Windows SmartScreen and macOS Gatekeeper
+warn on first run. To cut a release, bump the version in `package.json`,
+`src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml` so they match,
+then push a `v<version>` tag; a manual run instead produces a draft
+release you publish by hand.
 
 ## How it works
 
