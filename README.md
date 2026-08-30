@@ -7,12 +7,14 @@ original file every few seconds — so a sleep/wake tab reload (the
 original motivation: Firefox's built-in PDF viewer loses everything on
 that) can never wipe your work again.
 
-Primarily a Windows app — developed and used on native Windows — but it
-also builds and runs on Linux and macOS, with the few Windows-only bits
-(the long-path setting, opening help links in a browser) degrading
-gracefully elsewhere. Built and run interactively throughout
-development — this isn't a from-a-spec skeleton, the rough edges below
-are things that were actually hit and fixed.
+Primarily a Windows app — developed and used on native Windows, which is
+the only platform it's actually been tested on. It's *meant* to build
+and run on Linux and macOS too (the few Windows-only bits — the
+long-path setting, opening help links in a browser — degrade gracefully
+elsewhere), and the release workflow produces those builds, but they're
+untested: treat them as best-effort. Built and run interactively
+throughout development — this isn't a from-a-spec skeleton, the rough
+edges below are things that were actually hit and fixed.
 
 ## Features
 
@@ -75,9 +77,11 @@ Prebuilt binaries come from the `Release` GitHub Actions workflow
 a `v*` tag is pushed — never on an ordinary push:
 
 - **Windows** — NSIS installer plus a standalone portable `.exe`
-- **Linux** — AppImage
-- **macOS** — universal (Intel + Apple Silicon) `.dmg`
+- **Linux** — AppImage *(untested)*
+- **macOS** — universal (Intel + Apple Silicon) `.dmg` *(untested)*
 
+Only the Windows build has actually been run; the Linux and macOS
+artifacts compile in CI but haven't been verified on a real machine.
 The builds are unsigned, so Windows SmartScreen and macOS Gatekeeper
 warn on first run. To cut a release, bump the version in `package.json`,
 `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml` so they match,
