@@ -1,0 +1,107 @@
+name: Release
+
+# Runs only when triggered by hand from the Actions tab, or when a
+# version tag (v1.2.3) is pushed. Never on a normal push/PR.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS: one universal (Intel + Apple Silicon) .dmg / .app
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+            rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+          # Linux: AppImage only (Ubuntu 22.04 is the safe webkit baseline)
+          - platform: ubuntu-22.04
+            args: "--bundles appimage"
+            rust-targets: ""
+          # Windows: NSIS installer (the raw portable .exe is uploaded
+          # separately in the last step)
+          - platform: windows-latest
+            args: "--bundles nsis"
+            rust-targets: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            patchelf \
+            libfuse2 \
+            build-essential \
+            curl wget file
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build app and attach to release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # __VERSION__ is replaced with the version in src-tauri/tauri.conf.json
+          tagName: v__VERSION__
+          releaseName: "Daag v__VERSION__"
+          releaseBody: "See the assets below to download and install."
+          # Manual runs produce a draft (no git tag until you publish it);
+          # a pushed v* tag publishes the release immediately.
+          releaseDraft: ${{ github.event_name == 'workflow_dispatch' }}
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Read app version
+        if: matrix.platform == 'windows-latest'
+        id: version
+        shell: bash
+        run: echo "version=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload standalone Windows exe
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The raw compiled binary in target/release (not a bundle, so
+          # tauri-action doesn't upload it). Glob rather than hardcode the
+          # name, which follows the Cargo crate / productName.
+          exe=$(find src-tauri/target/release -maxdepth 1 -type f -name '*.exe' | head -n1)
+          echo "Found portable exe: $exe"
+          cp "$exe" "Daag-portable-x64.exe"
+          gh release upload "v${{ steps.version.outputs.version }}" "Daag-portable-x64.exe" --clobber
