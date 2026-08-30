@@ -36,6 +36,15 @@ const OPEN_MODE_KEY = "pdfAnnotator.openMode"; // "overwrite" | "ask" | "copy"
 const COPY_MAPPINGS_KEY = "pdfAnnotator.copyMappings";
 const THEME_KEY = "pdfAnnotator.theme"; // "default" | "light" | "dark"
 const THEME_CYCLE = ["default", "light", "dark"];
+// Set right after the user enables Windows long path support from Settings;
+// cleared on the next app start (a fresh process picks the setting up), so
+// the Settings status can say "restart to apply" only while that's true.
+const LONG_PATH_RESTART_PENDING_KEY = "pdfAnnotator.longPathRestartPending";
+// learn.microsoft.com page describing MAX_PATH and how enabling long paths
+// needs both the app manifest (we ship it — see build.rs) and this registry
+// value, which is why turning it on needs administrator approval.
+const LONG_PATH_DOC_URL =
+  "https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation#enable-long-paths-in-windows-10-version-1607-and-later";
 
 // "default" keeps the original look (dark chrome, light pdf.js viewer —
 // matches pdf.js's own default toolbar color); "light"/"dark" force both
@@ -76,6 +85,9 @@ const settingsDialogCancelButtonEl = document.getElementById("settingsDialogCanc
 const settingsDialogSaveButtonEl = document.getElementById("settingsDialogSaveButton");
 const commenterNameInputEl = document.getElementById("commenterNameInput");
 const openModeSelectEl = document.getElementById("openModeSelect");
+const longPathStatusEl = document.getElementById("longPathStatus");
+const enableLongPathButtonEl = document.getElementById("enableLongPathButton");
+const longPathDocLinkEl = document.getElementById("longPathDocLink");
 const undoAllDialogEl = document.getElementById("undoAllDialog");
 const undoAllDialogCloseButtonEl = document.getElementById("undoAllDialogCloseButton");
 const undoAllDialogCancelButtonEl = document.getElementById("undoAllDialogCancelButton");
@@ -254,9 +266,72 @@ function isKnownCopyPath(path) {
 function openSettingsDialog() {
   commenterNameInputEl.value = getCommenterName();
   openModeSelectEl.value = getOpenMode();
+  refreshLongPathStatus(); // fire-and-forget; fills in the status line async
   settingsDialogEl.showModal();
   commenterNameInputEl.focus();
 }
+
+// ---- Windows long path support (Settings) -------------------------------
+// Drag-and-drop of a PDF whose full path is longer than 259 chars is
+// silently refused by Explorer unless the process is long-path aware. We
+// ship the manifest half of that (build.rs); the other half is the
+// machine-wide HKLM LongPathsEnabled registry value, which needs elevation
+// to set. long_paths_enabled/enable_long_paths (src/main.rs) read and set
+// it; here we just reflect the state and offer the button.
+async function refreshLongPathStatus() {
+  setLongPathStatus("Checking…", null, { showButton: false });
+  let enabled;
+  try {
+    enabled = await invoke("long_paths_enabled");
+  } catch (err) {
+    console.error("Could not check long path support:", err);
+    setLongPathStatus("Couldn't check long path support.", "warn", { showButton: true });
+    return;
+  }
+  if (enabled === null || enabled === undefined) {
+    setLongPathStatus("Couldn't check long path support.", "warn", { showButton: true });
+  } else if (!enabled) {
+    localStorage.removeItem(LONG_PATH_RESTART_PENDING_KEY);
+    setLongPathStatus(
+      "Not enabled — long-path files can't be opened by drag-and-drop.",
+      "warn",
+      { showButton: true },
+    );
+  } else if (localStorage.getItem(LONG_PATH_RESTART_PENDING_KEY)) {
+    setLongPathStatus("Enabled — restart PDF Annotator to apply.", "ok", { showButton: false });
+  } else {
+    setLongPathStatus("Enabled.", "ok", { showButton: false });
+  }
+}
+
+function setLongPathStatus(text, state, { showButton }) {
+  longPathStatusEl.textContent = text;
+  if (state) longPathStatusEl.dataset.state = state;
+  else delete longPathStatusEl.dataset.state;
+  enableLongPathButtonEl.hidden = !showButton;
+}
+
+enableLongPathButtonEl.addEventListener("click", async () => {
+  enableLongPathButtonEl.disabled = true;
+  setLongPathStatus("Waiting for administrator approval…", null, { showButton: true });
+  try {
+    await invoke("enable_long_paths");
+    localStorage.setItem(LONG_PATH_RESTART_PENDING_KEY, "1");
+    await refreshLongPathStatus();
+  } catch (err) {
+    console.error("Could not enable long path support:", err);
+    setLongPathStatus(String(err), "warn", { showButton: true });
+  } finally {
+    enableLongPathButtonEl.disabled = false;
+  }
+});
+
+longPathDocLinkEl.addEventListener("click", (event) => {
+  event.preventDefault();
+  invoke("open_external", { url: LONG_PATH_DOC_URL }).catch((err) => {
+    console.error("Could not open the long path docs:", err);
+  });
+});
 
 settingsDialogSaveButtonEl.addEventListener("click", () => {
   setCommenterName(commenterNameInputEl.value.trim());
@@ -1638,6 +1713,16 @@ async function initializeViewer() {
 // waitForViewer() resolves (pdf.js's SPA boot can take a few hundred ms).
 renderRecentFiles();
 updateLandingOpenModeWarning();
+
+// This is a fresh process, so if long path support was enabled last run it
+// is now actually in effect — drop the "restart to apply" note.
+if (localStorage.getItem(LONG_PATH_RESTART_PENDING_KEY)) {
+  invoke("long_paths_enabled")
+    .then((enabled) => {
+      if (enabled === true) localStorage.removeItem(LONG_PATH_RESTART_PENDING_KEY);
+    })
+    .catch(() => {});
+}
 
 initializeViewer();
 

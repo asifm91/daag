@@ -276,8 +276,53 @@ reload already, so it renders correctly the first time.
 
 ### Rust side
 Intentionally thin — just wires up the `dialog`, `fs`, and (for the
-titlebar) `core:window:allow-set-title` capabilities, plus one command
-(`get_launch_path`, see below). All real logic is in the frontend.
+titlebar) `core:window:allow-set-title` capabilities, plus a few small
+glue commands, none with real logic: `get_os_username` /
+`get_launch_path` (see below), and — all Windows-only, `#[cfg(windows)]`
+with no-op `#[cfg(not(windows))]` stubs so `generate_handler!` stays
+valid off-Windows — `long_paths_enabled` / `enable_long_paths` /
+`open_external` (see "Windows long paths" below). All real logic is in
+the frontend.
+
+### Windows long paths (> MAX_PATH)
+Dragging a PDF whose absolute path exceeds ~259 chars onto the window is
+*silently refused by Explorer* — the shell rejects the drop before any
+event reaches wry, so `onDragDropEvent` never fires (no hover overlay, no
+open). The file picker has no such limit; it just returns such paths with
+a `\\?\` prefix, which `std::fs` (and thus every `@tauri-apps/plugin-fs`
+call) handles fine — which is why manual open always worked.
+
+Fixing drag-drop needs the process to be **long-path aware**, which is
+two independent switches, *both* required (Microsoft's rule):
+1. **App manifest** — `src-tauri/build.rs` supplies a custom Windows
+   manifest (`WindowsAttributes::new().app_manifest(...)` →
+   `try_build`) with `<ws2:longPathAware>true</ws2:longPathAware>`.
+   `app_manifest()` *replaces* Tauri's default, so the Common-Controls
+   v6 `<dependency>` (required by the native file dialogs) is repeated
+   verbatim in that string — copied from
+   `tauri-build`'s own `windows-app-manifest.xml`. See Tooling/build
+   note below.
+2. **Machine registry** —
+   `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled`
+   must be `1`. Reading it needs no elevation (`long_paths_enabled` →
+   `reg query`); writing it does (`enable_long_paths` → PowerShell
+   `Start-Process -Verb RunAs` on `reg add`, which raises the UAC
+   prompt). The NSIS installer runs `installMode: currentUser` so it
+   *can't* set this — instead the Settings dialog shows the current
+   state and an "Enable long path support…" button
+   (`refreshLongPathStatus`/`enableLongPathButton` in `main.js`), with a
+   link ("Learn how to enable it manually") — opened via `open_external`
+   (`rundll32 url.dll,…`, no `tauri-plugin-opener` dependency) — to
+   Microsoft's MAX_PATH page. After a successful enable,
+   `localStorage["pdfAnnotator.longPathRestartPending"]` gates a
+   "restart to apply" note; it's cleared on the next app start (a fresh
+   process picks the setting up).
+
+Once both are on, drag-drop *and* the file picker return long paths with
+**no** `\\?\` prefix. Pre-existing `\\?\`-prefixed recent-files entries
+still open fine (std handles them) — they just won't dedupe against a
+fresh clean-form open of the same file; left as-is since the list is
+capped at 8 and self-heals.
 
 ### Multiple windows & file-open entry points
 Deliberately **not** a single-instance app, and **not** registered as
@@ -315,6 +360,16 @@ reviewing.
 - `src-tauri/Cargo.toml` should **not** have a `[lib]` section — an
   earlier version did and broke `cargo metadata` (no `src/lib.rs` to back
   it). Only add one back if this evolves into a proper lib+bin split.
+- **`src-tauri/build.rs` supplies a custom Windows app manifest** (for
+  `longPathAware` — see "Windows long paths" above) via
+  `WindowsAttributes::new().app_manifest(<xml string>)` +
+  `try_build(Attributes::new().windows_attributes(...))` instead of the
+  bare `tauri_build::build()`. `app_manifest()` **replaces** Tauri's
+  default manifest wholesale, so that XML string must keep the
+  Common-Controls v6 `<dependency>` block (the native file dialogs need
+  it) — it's copied verbatim from `tauri-build`'s own bundled
+  `windows-app-manifest.xml`. If a `tauri-build` upgrade changes that
+  default, re-sync the copy.
 - `src-tauri/icons/icon.png` **and** `icon.ico` both need to exist for
   `cargo build`/`tauri::generate_context!()` to compile on Windows
   specifically (`tauri-build` needs `.ico` to generate the Windows
@@ -414,7 +469,9 @@ tab or an embedder that replicates browser behavior:
   safe at all — and routes it through `openPath()`, same as every other
   entry point. Guards against a still-open upstream bug where this event
   can fire twice for one drop (tauri-apps/tauri#14134) with a plain
-  synchronous in-flight flag.
+  synchronous in-flight flag. Note this event still never fires for a
+  file whose path is longer than ~259 chars unless the exe is long-path
+  aware — see "Windows long paths" above.
 - **pdf.js's own `setTitle()`/`document.title` is a no-op when embedded.**
   `isViewerEmbedded: window.parent !== window` is always true for an
   iframe, and `setTitle()` early-returns without touching `document.title`
