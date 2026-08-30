@@ -79,7 +79,14 @@ jobs:
           # __VERSION__ is replaced with the version in src-tauri/tauri.conf.json
           tagName: v__VERSION__
           releaseName: "Daag v__VERSION__"
-          releaseBody: "See the assets below to download and install."
+          releaseBody: |
+            Download the file for your platform below.
+
+            - **Windows** — `*_x64-setup.exe` (installer) or `Daag-portable-x64.exe` (no install needed)
+            - **Linux** — `*_amd64.AppImage`
+            - **macOS** — `*_universal.dmg`
+
+            **macOS first launch:** the app is unsigned, so Gatekeeper will block it. Right-click the app → Open (macOS 14 and earlier), or open it once then go to System Settings → Privacy & Security → "Open Anyway" (macOS 15+). Or from a terminal: `xattr -dr com.apple.quarantine /Applications/Daag.app`
           # Manual runs produce a draft (no git tag until you publish it);
           # a pushed v* tag publishes the release immediately.
           releaseDraft: ${{ github.event_name == 'workflow_dispatch' }}
@@ -87,10 +94,22 @@ jobs:
           args: ${{ matrix.args }}
 
       - name: Read app version
-        if: matrix.platform == 'windows-latest'
         id: version
         shell: bash
         run: echo "version=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Drop the macOS .app archive from the release
+        if: matrix.platform == 'macos-latest'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Only the .dmg is needed; the .app.tar.gz (+ .sig) is a Tauri
+          # updater artifact and this app has no updater.
+          tag="v${{ steps.version.outputs.version }}"
+          for a in "Daag_universal.app.tar.gz" "Daag_universal.app.tar.gz.sig"; do
+            gh release delete-asset "$tag" "$a" --yes && echo "deleted $a" || echo "not present: $a"
+          done
 
       - name: Upload standalone Windows exe
         if: matrix.platform == 'windows-latest'
