@@ -316,7 +316,10 @@ two independent switches, *both* required (Microsoft's rule):
    Microsoft's MAX_PATH page. After a successful enable,
    `localStorage["pdfAnnotator.longPathRestartPending"]` gates a
    "restart to apply" note; it's cleared on the next app start (a fresh
-   process picks the setting up).
+   process picks the setting up). The whole Settings row (`#longPathRow`,
+   `hidden` by default) only un-hides when `long_paths_enabled` returns a
+   real bool — on a non-Windows build the `#[cfg(not(windows))]` stub
+   returns `None`/`null` and the row stays hidden.
 
 Once both are on, drag-drop *and* the file picker return long paths with
 **no** `\\?\` prefix. Pre-existing `\\?\`-prefixed recent-files entries

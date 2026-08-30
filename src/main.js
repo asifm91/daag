@@ -85,6 +85,7 @@ const settingsDialogCancelButtonEl = document.getElementById("settingsDialogCanc
 const settingsDialogSaveButtonEl = document.getElementById("settingsDialogSaveButton");
 const commenterNameInputEl = document.getElementById("commenterNameInput");
 const openModeSelectEl = document.getElementById("openModeSelect");
+const longPathRowEl = document.getElementById("longPathRow");
 const longPathStatusEl = document.getElementById("longPathStatus");
 const enableLongPathButtonEl = document.getElementById("enableLongPathButton");
 const longPathDocLinkEl = document.getElementById("longPathDocLink");
@@ -277,8 +278,11 @@ function openSettingsDialog() {
 // ship the manifest half of that (build.rs); the other half is the
 // machine-wide HKLM LongPathsEnabled registry value, which needs elevation
 // to set. long_paths_enabled/enable_long_paths (src/main.rs) read and set
-// it; here we just reflect the state and offer the button.
+// it; here we just reflect the state and offer the button. The whole row
+// is Windows-only — on any other platform long_paths_enabled resolves to
+// null (a no-op stub) and the row is hidden.
 async function refreshLongPathStatus() {
+  longPathRowEl.hidden = false;
   setLongPathStatus("Checking…", null, { showButton: false });
   let enabled;
   try {
@@ -289,7 +293,7 @@ async function refreshLongPathStatus() {
     return;
   }
   if (enabled === null || enabled === undefined) {
-    setLongPathStatus("Couldn't check long path support.", "warn", { showButton: true });
+    longPathRowEl.hidden = true; // not a Windows build
   } else if (!enabled) {
     localStorage.removeItem(LONG_PATH_RESTART_PENDING_KEY);
     setLongPathStatus(
