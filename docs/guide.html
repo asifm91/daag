@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Daag — Guide</title>
+    <meta
+      name="description"
+      content="Keyboard shortcuts, how-tos, and a settings reference for Daag, the local-first PDF annotator."
+    />
+    <link rel="icon" type="image/png" href="icon.png" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="wrap nav">
+        <a class="brand" href="index.html">
+          <img src="icon.png" alt="Daag icon" />
+          <span class="name">Daag</span>
+        </a>
+        <span class="spacer"></span>
+        <a class="ghlink" href="index.html#features">Features</a>
+        <a class="ghlink" href="index.html#download">Download</a>
+        <a class="ghlink" href="guide.html" aria-current="page">Guide</a>
+        <a class="ghlink" href="changelog.html">Changelog</a>
+        <a class="ghlink" href="https://github.com/asifm91/daag">GitHub</a>
+      </div>
+    </header>
+
+    <main>
+      <div class="wrap page-head">
+        <h1>Guide</h1>
+        <p class="lead">
+          The keys, the common tasks, and every setting — one page. Everything
+          you add to a PDF is saved back into the file automatically within a
+          few seconds, so none of the steps below end with “now save”.
+        </p>
+        <nav class="toc" aria-label="On this page">
+          <b>On this page</b>
+          <ul>
+            <li><a href="#shortcuts">Keyboard shortcuts</a></li>
+            <li><a href="#howtos">How-tos</a></li>
+            <li><a href="#settings">Settings reference</a></li>
+          </ul>
+        </nav>
+      </div>
+
+      <section id="shortcuts" class="wrap">
+        <h2>Keyboard shortcuts</h2>
+        <p class="lead">
+          These are the shortcuts Daag adds on top of pdf.js’s own (page
+          navigation, <kbd>Ctrl</kbd>+<kbd>F</kbd> to find, and so on, which
+          all still work).
+        </p>
+        <table class="keys">
+          <thead>
+            <tr>
+              <th>Key</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>S</kbd></td>
+              <td>Save now, without waiting for the autosave timer.</td>
+            </tr>
+            <tr>
+              <td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>W</kbd></td>
+              <td>
+                Close the document and return to the landing screen (a pending
+                save is flushed first).
+              </td>
+            </tr>
+            <tr>
+              <td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>O</kbd></td>
+              <td>Open a PDF with the file picker.</td>
+            </tr>
+            <tr>
+              <td><kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td>
+              <td>
+                Previous / next PDF in the same folder as the open file.
+              </td>
+            </tr>
+            <tr>
+              <td><kbd>F</kbd></td>
+              <td>Highlight tool.</td>
+            </tr>
+            <tr>
+              <td><kbd>A</kbd></td>
+              <td>Text-box (free-text) tool.</td>
+            </tr>
+            <tr>
+              <td><kbd>D</kbd></td>
+              <td>Draw (freehand ink) tool.</td>
+            </tr>
+            <tr>
+              <td><kbd>C</kbd></td>
+              <td>Comment on the current text selection.</td>
+            </tr>
+            <tr>
+              <td><kbd>Q</kbd></td>
+              <td>
+                Open the quick-comment menu at the pointer. Right-clicking a
+                page does the same.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="keys-note">
+          The single-key shortcuts (<kbd>F</kbd> <kbd>A</kbd> <kbd>D</kbd>
+          <kbd>C</kbd> <kbd>Q</kbd>) pause while you’re typing in a text box or
+          a comment, so they don’t fire from letters in your notes.
+        </p>
+      </section>
+
+      <section id="howtos" class="wrap">
+        <h2>How-tos</h2>
+        <p class="lead">Short recipes for the things people ask about most.</p>
+
+        <div class="howto">
+          <p class="group-label">Annotating</p>
+
+          <div>
+            <h3>Highlight, draw, or add a text box</h3>
+            <p>
+              Pick a tool from the toolbar, or press <kbd>F</kbd>,
+              <kbd>D</kbd>, or <kbd>A</kbd>, then act on the page. What you add
+              is written into the PDF within a few seconds — there is no Save
+              step, though <kbd>Ctrl</kbd>+<kbd>S</kbd> forces one.
+            </p>
+          </div>
+
+          <div>
+            <h3>Comment on a passage</h3>
+            <p>
+              Select some text and press <kbd>C</kbd> (or use pdf.js’s floating
+              comment button). Type the note; it stays attached to that spot.
+            </p>
+          </div>
+
+          <div>
+            <h3>Use quick comments</h3>
+            <p>
+              For phrases you write over and over, press <kbd>Q</kbd> or
+              right-click the page and pick one — it drops in as a comment with
+              no dialog. Type a new phrase into the menu’s box to add it. The
+              list reorders by how often you use each phrase, and any comment
+              you repeat within a document is folded in automatically. Manage
+              the list under <b>Settings → Quick comments</b>.
+            </p>
+          </div>
+
+          <p class="group-label">Comments</p>
+
+          <div>
+            <h3>Export the comments</h3>
+            <p>
+              <b>Export Comments</b> in the toolbar writes every comment to a
+              separate file you can read or share outside the PDF.
+            </p>
+          </div>
+
+          <div>
+            <h3>Summarise the comments with AI</h3>
+            <p>
+              <b>Summarize Comments</b> in the toolbar sends the document’s
+              comments to a language model and shows a written recap. The
+              dialog opens straight away; <b>Regenerate</b> runs a fresh pass
+              and <b>Stop</b> cancels one mid-flight. The result is cached per
+              document, so pressing the button again is instant unless the
+              comments changed.
+            </p>
+          </div>
+
+          <div>
+            <h3>Point the summary at a model</h3>
+            <p>
+              Out of the box Daag expects a local
+              <a href="https://ollama.com/">Ollama</a> at
+              <code>http://localhost:11434/v1</code> running
+              <code>llama3.2</code>, so nothing leaves your machine. Under
+              <b>Settings → AI summary</b> you can set any OpenAI-compatible
+              endpoint (LM Studio, OpenRouter, OpenAI, …), the model, an
+              optional API key, and the system prompt. <b>Test connection</b>
+              checks the endpoint before you rely on it, and the summary
+              dialog’s own <b>Model</b> field switches models per run.
+            </p>
+          </div>
+
+          <p class="group-label">Files &amp; navigation</p>
+
+          <div>
+            <h3>Open a PDF</h3>
+            <p>
+              Use the <b>Open</b> button, drag a file onto the window, press
+              <kbd>Ctrl</kbd>+<kbd>O</kbd>, or choose “Open with → Daag” in
+              your file manager. Every route opens the real file on disk —
+              Daag never loads a detached copy it can’t save back.
+            </p>
+          </div>
+
+          <div>
+            <h3>Work through a folder</h3>
+            <p>
+              With a file open, <kbd>Alt</kbd>+<kbd>←</kbd> /
+              <kbd>Alt</kbd>+<kbd>→</kbd> (or the titlebar arrows) step through
+              the other PDFs in the same folder, like an image viewer.
+            </p>
+          </div>
+
+          <div>
+            <h3>Edit the original, or a copy</h3>
+            <p>
+              <b>Settings → General → When opening a PDF</b> decides what an
+              open does: overwrite the original in place, always create a copy
+              and edit that, or ask each time. When it asks, your answer is
+              remembered per file.
+            </p>
+          </div>
+
+          <div>
+            <h3>Pick up where you left off</h3>
+            <p>
+              The landing screen lists recent files, most recent first.
+              Reopening one returns to the page and scroll position you had.
+              Daag does not reopen the last file on its own — the landing
+              screen always greets you first.
+            </p>
+          </div>
+
+          <p class="group-label">Maintenance</p>
+
+          <div>
+            <h3>Update the app</h3>
+            <p>
+              Daag checks GitHub for a newer release shortly after launch and
+              shows a dialog if there is one; you can also check any time from
+              <b>Settings → Updates</b>. Nothing downloads or installs until
+              you click <b>Install</b>.
+            </p>
+          </div>
+
+          <div>
+            <h3>Enable long paths (Windows)</h3>
+            <p>
+              To open files whose full path is longer than 260 characters by
+              drag-and-drop, <b>Settings → Windows long path support</b> shows
+              the current state and an enable button. It changes a system-wide
+              setting, so Windows asks for administrator approval, and Daag
+              needs a restart afterwards. The file picker already handles long
+              paths without this.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="settings" class="wrap">
+        <h2>Settings reference</h2>
+        <p class="lead">
+          Open Settings from the titlebar gear. Changes in the General and AI
+          summary tabs apply on <b>Save</b>; Quick comments edits apply
+          immediately.
+        </p>
+
+        <div class="howto">
+          <p class="group-label">General</p>
+          <table class="keys">
+            <tbody>
+              <tr>
+                <td>Commenter name</td>
+                <td>
+                  Author name attached to the comments and annotations you
+                  create. Defaults to your OS username.
+                </td>
+              </tr>
+              <tr>
+                <td>When opening a PDF</td>
+                <td>
+                  <b>Always overwrite the original file</b> (default),
+                  <b>Ask each time</b>, or <b>Always create a copy</b>. See
+                  “Edit the original, or a copy” above.
+                </td>
+              </tr>
+              <tr>
+                <td>Updates</td>
+                <td>
+                  Shows the current version and a <b>Check for updates…</b>
+                  button. An available update downloads and installs in place,
+                  then restarts the app — only after you confirm.
+                </td>
+              </tr>
+              <tr>
+                <td>Windows long path support</td>
+                <td>
+                  Windows only. Shows whether the system setting is on and
+                  offers to enable it (one administrator prompt, then a
+                  restart). Hidden on other platforms.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <p class="group-label">AI summary</p>
+          <table class="keys">
+            <tbody>
+              <tr>
+                <td>AI summary endpoint</td>
+                <td>
+                  Base URL of an OpenAI-compatible
+                  <code>/chat/completions</code> API. Blank uses
+                  <code>http://localhost:11434/v1</code> (local Ollama).
+                </td>
+              </tr>
+              <tr>
+                <td>Model</td>
+                <td>
+                  Model name sent with each request. Blank uses
+                  <code>llama3.2</code>. The field remembers models you’ve
+                  used, so switching is a pick.
+                </td>
+              </tr>
+              <tr>
+                <td>API key</td>
+                <td>
+                  Optional bearer token for hosted providers. Leave blank for
+                  local models. Sent only from the app’s Rust side, never from
+                  the page.
+                </td>
+              </tr>
+              <tr>
+                <td>Summary system prompt</td>
+                <td>
+                  Instructions the model gets before your comments.
+                  <b>Restore default</b> puts back the bundled prompt.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <p class="group-label">Quick comments</p>
+          <table class="keys">
+            <tbody>
+              <tr>
+                <td>Phrase list</td>
+                <td>
+                  Every quick-comment phrase with its use count and a
+                  <b>Remove</b> button. Starts empty — phrases are added by
+                  typing them into the menu or by repeating a comment within a
+                  document. Edits here take effect at once.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap row">
+        <span>Daag — local-first PDF annotation. MIT licensed.</span>
+        <span
+          ><a href="https://github.com/asifm91/daag"
+            >github.com/asifm91/daag</a
+          ></span
+        >
+      </div>
+    </footer>
+  </body>
+</html>

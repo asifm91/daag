@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Daag — Changelog</title>
+    <meta
+      name="description"
+      content="Release history for Daag, the local-first PDF annotator."
+    />
+    <link rel="icon" type="image/png" href="icon.png" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="wrap nav">
+        <a class="brand" href="index.html">
+          <img src="icon.png" alt="Daag icon" />
+          <span class="name">Daag</span>
+        </a>
+        <span class="spacer"></span>
+        <a class="ghlink" href="index.html#features">Features</a>
+        <a class="ghlink" href="index.html#download">Download</a>
+        <a class="ghlink" href="guide.html">Guide</a>
+        <a class="ghlink" href="changelog.html" aria-current="page">Changelog</a>
+        <a class="ghlink" href="https://github.com/asifm91/daag">GitHub</a>
+      </div>
+    </header>
+
+    <main>
+      <div class="wrap page-head">
+        <h1>Changelog</h1>
+        <p class="lead">
+          Notable changes per release. Each version links to its full notes on
+          GitHub; installed copies also show the notes in the update dialog.
+        </p>
+      </div>
+
+      <section class="wrap">
+        <div class="release">
+          <h2>
+            v1.2.0
+            <span class="date">2026-09-01</span>
+            <a
+              class="gh"
+              href="https://github.com/asifm91/daag/releases/tag/v1.2.0"
+              >see release →</a
+            >
+          </h2>
+          <h3>Changed</h3>
+          <ul>
+            <li>
+              <b>Settings is now tabbed</b> — General, AI summary, and Quick
+              comments, instead of one long dialog.
+            </li>
+          </ul>
+          <h3>Added</h3>
+          <ul>
+            <li>
+              <b>Test connection</b> button in AI summary settings — checks the
+              endpoint (and model) before you rely on it for a summary.
+            </li>
+          </ul>
+        </div>
+
+        <div class="release">
+          <h2>
+            v1.1.0
+            <span class="date">2026-09-01</span>
+            <a
+              class="gh"
+              href="https://github.com/asifm91/daag/releases/tag/v1.1.0"
+              >see release →</a
+            >
+          </h2>
+          <h3>Added</h3>
+          <ul>
+            <li>
+              <b>AI comment summary</b> — send a document’s comments to an
+              OpenAI-compatible model (a local Ollama by default, so nothing
+              leaves your machine) and get a written recap, with
+              regenerate / stop and a per-document cache.
+            </li>
+            <li>
+              <b>Quick comments</b> — press <kbd>Q</kbd> or right-click a page
+              for a menu of the review phrases you reuse most, ranked by use
+              and dropped in with no dialog.
+            </li>
+            <li>
+              <b>Built-in updates</b> — Daag checks GitHub for a newer release
+              on launch and from Settings, and installs it on your confirmation
+              before restarting.
+            </li>
+            <li>
+              <b><kbd>Ctrl</kbd>+<kbd>W</kbd></b> closes the document and
+              returns to the landing screen.
+            </li>
+            <li>A Linux <code>.deb</code> build alongside the AppImage.</li>
+            <li>This website.</li>
+          </ul>
+          <h3>Changed</h3>
+          <ul>
+            <li>
+              <b>Reload is blocked</b> — <kbd>F5</kbd>, <kbd>Ctrl</kbd>+<kbd>R</kbd>,
+              and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> no longer drop
+              the editing session by accident.
+            </li>
+          </ul>
+        </div>
+
+        <div class="release">
+          <h2>
+            v1.0.0
+            <span class="date">2026-08-30</span>
+            <a
+              class="gh"
+              href="https://github.com/asifm91/daag/releases/tag/v1.0.0"
+              >see release →</a
+            >
+          </h2>
+          <h3>Added</h3>
+          <ul>
+            <li>First tagged release, and the rename to <b>Daag</b>.</li>
+            <li>
+              <b>Custom titlebar</b> with a default / light / dark theme
+              toggle; Open, Previous / Next, Activity Log, and Settings live in
+              it.
+            </li>
+            <li>
+              Open PDFs from the <b>command line</b>, a <b>file association</b>,
+              and <b>“Open with”</b> — without taking over as the default
+              viewer.
+            </li>
+            <li>
+              <b>Drag-and-drop at Windows long paths</b>, with a Settings
+              toggle to enable long-path support.
+            </li>
+            <li>
+              <b>Cross-platform release workflow</b> — Windows, plus
+              experimental Linux and macOS builds.
+            </li>
+          </ul>
+          <h3>Changed</h3>
+          <ul>
+            <li>
+              The window title tracks the PDF’s own metadata title and shows
+              the full file path on hover.
+            </li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap row">
+        <span>Daag — local-first PDF annotation. MIT licensed.</span>
+        <span
+          ><a href="https://github.com/asifm91/daag"
+            >github.com/asifm91/daag</a
+          ></span
+        >
+      </div>
+    </footer>
+  </body>
+</html>

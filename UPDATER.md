@@ -10,6 +10,21 @@ Almost all of this is wired up in the repo already. The one thing that
 isn't — and can't be, because it's a secret — is the signing key on the
 CI side.
 
+## Cutting a release
+
+1. Bump the version in the three manifests so they agree:
+   `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`
+   (`version = "x.y.z"`).
+2. **Update `docs/changelog.html`** — add a new `<div class="release">`
+   block at the top of the list (copy the newest one, change the version,
+   date, and `releases/tag/…` link, rewrite the bullets). The site is
+   hand-maintained; nothing generates this.
+3. Commit, then `git tag vx.y.z && git push --tags`.
+4. `tauri-action` builds and signs the bundles, generates `latest.json`,
+   and uploads everything to the release. A pushed tag publishes the
+   release immediately; a manual `workflow_dispatch` run leaves a **draft**
+   that the updater ignores until you publish it (see Notes).
+
 ## One-time: add the signing key to GitHub Actions
 
 The updater only installs builds signed with the private half of a
