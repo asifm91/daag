@@ -171,6 +171,20 @@
       #settingsDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); }
       #settingsDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
       #settingsDialogBody { padding: 16px; overflow-y: auto; max-height: min(70vh, 560px); }
+      /* Tab strip spans the full body width (cancels the 16px padding) and
+         sits on the same border line as the header/footer. */
+      #settingsTabs { display: flex; margin: -16px -16px 16px; padding: 0 16px; border-bottom: 1px solid var(--border); }
+      #settingsTabs button { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; margin: 0 16px -1px 0; padding: 10px 2px; font-size: 12px; color: var(--fg-muted); cursor: pointer; }
+      #settingsTabs button:hover { background: none; color: var(--fg); }
+      #settingsTabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--fg); }
+      /* All panels stack in one grid cell so the dialog is always as tall as
+         the tallest tab and never resizes on tab switch. Inactive panels keep
+         their layout box (for the sizing) but are hidden and non-interactive. */
+      #settingsTabPanels { display: grid; }
+      #settingsTabPanels > .settingsTabPanel { grid-area: 1 / 1; min-width: 0; }
+      .settingsTabPanel[hidden] { display: block; visibility: hidden; }
+      .settingsTabPanel > *:first-child { margin-top: 0; }
+      #settingsPanelAi #aiSummaryRow, #settingsPanelQuick #quickCommentsRow { margin-top: 0; }
       #settingsDialogBody label { display: block; font-size: 12px; color: var(--fg-muted); margin-bottom: 6px; }
       #settingsDialogBody label:not(:first-child) { margin-top: 14px; }
       #commenterNameInput, #openModeSelect { width: 100%; box-sizing: border-box; background: var(--input-bg); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; padding: 7px 9px; font-size: 13px; }
@@ -452,73 +466,87 @@
         <button id="settingsDialogCloseButton" type="button">Close</button>
       </div>
       <div id="settingsDialogBody">
-        <label for="commenterNameInput">Commenter name</label>
-        <input id="commenterNameInput" type="text" autocomplete="off" placeholder="Your name" />
-
-        <label for="openModeSelect">When opening a PDF</label>
-        <select id="openModeSelect">
-          <option value="overwrite">Always overwrite the original file</option>
-          <option value="ask">Ask each time</option>
-          <option value="copy">Always create a copy</option>
-        </select>
-
-        <div id="quickCommentsRow">
-          <label>Quick comments</label>
-          <p class="settings-help">
-            Phrases offered when you right-click a page or press <code>Q</code>
-            in the viewer, most-used first. They're added as you use them, and
-            when exporting or summarizing surfaces a comment that repeats within
-            a document. Nothing is pre-filled.
-          </p>
-          <ul id="quickCommentsManageList"></ul>
+        <div id="settingsTabs" role="tablist">
+          <button id="settingsTabGeneral" type="button" role="tab" aria-controls="settingsPanelGeneral" aria-selected="true">General</button>
+          <button id="settingsTabAi" type="button" role="tab" aria-controls="settingsPanelAi" aria-selected="false">AI summary</button>
+          <button id="settingsTabQuick" type="button" role="tab" aria-controls="settingsPanelQuick" aria-selected="false">Quick comments</button>
         </div>
 
-        <div id="updateRow">
-          <label>Updates</label>
-          <p id="updateStatus" class="settings-status">দাগ</p>
-          <button id="checkUpdateButton" type="button">Check for updates…</button>
-          <p class="settings-help">
-            দাগ checks its GitHub releases page for a newer version on
-            launch. You can also check now — an available update downloads
-            and installs in place, then restarts the app.
-          </p>
-        </div>
+        <div id="settingsTabPanels">
+        <section id="settingsPanelGeneral" class="settingsTabPanel" role="tabpanel" aria-labelledby="settingsTabGeneral">
+          <label for="commenterNameInput">Commenter name</label>
+          <input id="commenterNameInput" type="text" autocomplete="off" placeholder="Your name" />
 
-        <div id="longPathRow" hidden>
-          <label>Windows long path support</label>
-          <p id="longPathStatus" class="settings-status">Checking…</p>
-          <button id="enableLongPathButton" type="button" hidden>Enable long path support…</button>
-          <p id="longPathHelp" class="settings-help">
-            Required to open PDFs whose full path is longer than 260 characters by
-            drag-and-drop. Enabling changes a system-wide Windows setting, so
-            Windows asks for administrator approval, and দাগ must be
-            restarted afterward for it to take effect.
-            <a id="longPathDocLink" href="#">Learn how to enable it manually</a>
-          </p>
-        </div>
+          <label for="openModeSelect">When opening a PDF</label>
+          <select id="openModeSelect">
+            <option value="overwrite">Always overwrite the original file</option>
+            <option value="ask">Ask each time</option>
+            <option value="copy">Always create a copy</option>
+          </select>
 
-        <div id="aiSummaryRow">
-          <label for="aiEndpointInput">AI summary endpoint</label>
-          <input id="aiEndpointInput" type="text" autocomplete="off" spellcheck="false" placeholder="http://localhost:11434/v1" />
+          <div id="updateRow">
+            <label>Updates</label>
+            <p id="updateStatus" class="settings-status">দাগ</p>
+            <button id="checkUpdateButton" type="button">Check for updates…</button>
+            <p class="settings-help">
+              দাগ checks its GitHub releases page for a newer version on
+              launch. You can also check now — an available update downloads
+              and installs in place, then restarts the app.
+            </p>
+          </div>
 
-          <label for="aiModelInput">Model</label>
-          <input id="aiModelInput" type="text" list="aiModelHistoryList" autocomplete="off" spellcheck="false" placeholder="llama3.2" />
+          <div id="longPathRow" hidden>
+            <label>Windows long path support</label>
+            <p id="longPathStatus" class="settings-status">Checking…</p>
+            <button id="enableLongPathButton" type="button" hidden>Enable long path support…</button>
+            <p id="longPathHelp" class="settings-help">
+              Required to open PDFs whose full path is longer than 260 characters by
+              drag-and-drop. Enabling changes a system-wide Windows setting, so
+              Windows asks for administrator approval, and দাগ must be
+              restarted afterward for it to take effect.
+              <a id="longPathDocLink" href="#">Learn how to enable it manually</a>
+            </p>
+          </div>
+        </section>
 
-          <label for="aiApiKeyInput">API key</label>
-          <input id="aiApiKeyInput" type="password" autocomplete="off" placeholder="Leave blank for local models" />
+        <section id="settingsPanelAi" class="settingsTabPanel" role="tabpanel" aria-labelledby="settingsTabAi" hidden>
+          <div id="aiSummaryRow">
+            <label for="aiEndpointInput">AI summary endpoint</label>
+            <input id="aiEndpointInput" type="text" autocomplete="off" spellcheck="false" placeholder="http://localhost:11434/v1" />
 
-          <p class="settings-help">
-            Powers the toolbar's “Summarize Comments” button. Any
-            OpenAI-compatible <code>/chat/completions</code> endpoint works — a
-            local <a id="ollamaDocLink" href="#">Ollama</a> server (the default),
-            LM Studio, OpenRouter, or OpenAI. Comment text is sent to whichever
-            endpoint you set here, so a local server keeps everything on your
-            machine.
-          </p>
+            <label for="aiModelInput">Model</label>
+            <input id="aiModelInput" type="text" list="aiModelHistoryList" autocomplete="off" spellcheck="false" placeholder="llama3.2" />
 
-          <label for="aiSystemPromptInput">Summary system prompt</label>
-          <textarea id="aiSystemPromptInput" rows="8" autocomplete="off" spellcheck="false"></textarea>
-          <button id="aiSystemPromptRestoreButton" type="button">Restore default</button>
+            <label for="aiApiKeyInput">API key</label>
+            <input id="aiApiKeyInput" type="password" autocomplete="off" placeholder="Leave blank for local models" />
+
+            <p class="settings-help">
+              Powers the toolbar's “Summarize Comments” button. Any
+              OpenAI-compatible <code>/chat/completions</code> endpoint works — a
+              local <a id="ollamaDocLink" href="#">Ollama</a> server (the default),
+              LM Studio, OpenRouter, or OpenAI. Comment text is sent to whichever
+              endpoint you set here, so a local server keeps everything on your
+              machine.
+            </p>
+
+            <label for="aiSystemPromptInput">Summary system prompt</label>
+            <textarea id="aiSystemPromptInput" rows="8" autocomplete="off" spellcheck="false"></textarea>
+            <button id="aiSystemPromptRestoreButton" type="button">Restore default</button>
+          </div>
+        </section>
+
+        <section id="settingsPanelQuick" class="settingsTabPanel" role="tabpanel" aria-labelledby="settingsTabQuick" hidden>
+          <div id="quickCommentsRow">
+            <label>Quick comments</label>
+            <p class="settings-help">
+              Phrases offered when you right-click a page or press <code>Q</code>
+              in the viewer, most-used first. They're added as you use them, and
+              when exporting or summarizing surfaces a comment that repeats within
+              a document. Nothing is pre-filled.
+            </p>
+            <ul id="quickCommentsManageList"></ul>
+          </div>
+        </section>
         </div>
       </div>
       <div id="settingsDialogFooter">

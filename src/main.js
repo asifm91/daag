@@ -122,6 +122,8 @@ const settingsDialogEl = document.getElementById("settingsDialog");
 const settingsDialogCloseButtonEl = document.getElementById("settingsDialogCloseButton");
 const settingsDialogCancelButtonEl = document.getElementById("settingsDialogCancelButton");
 const settingsDialogSaveButtonEl = document.getElementById("settingsDialogSaveButton");
+const settingsTabButtonEls = [...settingsDialogEl.querySelectorAll("#settingsTabs button")];
+const settingsTabPanelEls = [...settingsDialogEl.querySelectorAll(".settingsTabPanel")];
 const commenterNameInputEl = document.getElementById("commenterNameInput");
 const openModeSelectEl = document.getElementById("openModeSelect");
 const quickCommentsManageListEl = document.getElementById("quickCommentsManageList");
@@ -398,7 +400,23 @@ function isKnownCopyPath(path) {
   return Object.values(getCopyMappings()).some((entry) => entry.mode === "copy" && entry.copyPath === path);
 }
 
+// Settings is a tabbed pane (General / AI summary / Quick comments) —
+// switching just toggles `hidden` on the matching <section>, no lazy
+// rendering, so openSettingsDialog() still primes every field up front.
+function selectSettingsTab(tabId) {
+  for (const btn of settingsTabButtonEls) {
+    btn.setAttribute("aria-selected", btn.id === tabId ? "true" : "false");
+  }
+  for (const panel of settingsTabPanelEls) {
+    panel.hidden = panel.getAttribute("aria-labelledby") !== tabId;
+  }
+}
+for (const btn of settingsTabButtonEls) {
+  btn.addEventListener("click", () => selectSettingsTab(btn.id));
+}
+
 function openSettingsDialog() {
+  selectSettingsTab("settingsTabGeneral");
   commenterNameInputEl.value = getCommenterName();
   openModeSelectEl.value = getOpenMode();
   aiEndpointInputEl.value = getAiEndpoint();
