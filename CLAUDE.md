@@ -40,6 +40,30 @@ The iframe stays `display:none` (not unloaded) while the landing screen
 shows, so pdf.js and all the hooks below are already warm by the time a
 file is picked.
 
+**Ctrl+W closes the open document** back to the landing screen
+(`closeCurrentPdf()`): flush a save if dirty, `PDFViewerApplication.close()`,
+null out the session state (`currentPath`, `sessionOriginalBytes`,
+`folderPdf*`, `summaryCache`, `currentTitleBase`), disable the injected
+toolbar buttons, reset the window title to `DEFAULT_WINDOW_TITLE`, show the
+landing screen. It is **not** a window reload — an earlier version just did
+`location.reload()`, which only *looked* like closing because startup
+doesn't auto-reopen the last file, but a file opened via `get_launch_path`
+(CLI arg / Explorer "Open with") was passed on `argv[1]` again on the fresh
+process and reopened itself. No-op on the landing screen.
+
+**Ctrl+R / F5 / Ctrl+Shift+R reload is blocked.** An accidental reload
+mid-annotation drops the pdf.js editing session, and (via `get_launch_path`)
+can silently reopen a file you just closed. The real block is Rust-side —
+`disable_browser_accelerator_keys()` in `src-tauri/src/main.rs` sets
+WebView2's `AreBrowserAcceleratorKeysEnabled` to `false` in the Tauri
+`setup` hook (via `with_webview` → `ICoreWebView2Settings3`). That also
+disables the other browser accelerators (Ctrl+P, Ctrl+F, Ctrl +/-/0 zoom,
+F12) — pdf.js has its own find/print/zoom and DevTools is still on the
+right-click menu, so this is fine, arguably better. `blockReloadKeys()` in
+`main.js` is a capture-phase `preventDefault` fallback for `vite` dev (no
+Tauri webview there) and old WebView2 runtimes lacking
+`ICoreWebView2Settings3`.
+
 ### Custom titlebar
 `app.windows[0].decorations` is `false` in `tauri.conf.json` — no native
 Windows titlebar at all. `#titlebar` in `index.html`
@@ -459,6 +483,13 @@ OpenAI-compatible `/chat/completions` POST for the AI comment summary
 feature, plus an abort path for it, backed by a small `SummaryTask`
 managed-state slot holding the in-flight task handle (see "AI comment
 summary" above). All real logic is in the frontend.
+
+The one bit of Rust that isn't a command is a `setup` hook calling
+`disable_browser_accelerator_keys()` (Windows-only): `with_webview` →
+`ICoreWebView2Settings3::SetAreBrowserAcceleratorKeysEnabled(false)` to
+kill F5 / Ctrl+R reload and the other browser accelerators — see "Two-screen
+UI" above. Pulls `webview2-com` + `windows-core` as direct deps, both
+already in the tree via wry and pinned to the versions it resolves.
 
 ### Windows long paths (> MAX_PATH)
 Dragging a PDF whose absolute path exceeds ~259 chars onto the window is

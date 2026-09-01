@@ -348,11 +348,48 @@ async fn run_chat_request(
         .ok_or_else(|| "The AI endpoint returned an empty summary.".into())
 }
 
+/// Turn off WebView2's built-in browser accelerator keys — most importantly
+/// F5 / Ctrl+R / Ctrl+Shift+R reload, which the webview host handles above
+/// the DOM (so a JS `preventDefault` can't stop them) and which would drop
+/// the current editing session on an accidental press. Ctrl+W is wired to a
+/// real, save-flushing close in the frontend instead. This also disables
+/// the other browser accelerators (Ctrl+P, Ctrl+F, Ctrl +/-/0 zoom, F12) —
+/// pdf.js ships its own find / print / zoom, and DevTools stays reachable
+/// from the right-click menu. No-op if the installed WebView2 runtime is
+/// too old to expose ICoreWebView2Settings3 (Edge < 88).
+#[cfg(windows)]
+fn disable_browser_accelerator_keys(app: &tauri::App) {
+    use tauri::Manager;
+
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let _ = window.with_webview(|webview| {
+        use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+        use windows_core::Interface;
+
+        unsafe {
+            if let Ok(core) = webview.controller().CoreWebView2() {
+                if let Ok(settings) = core.Settings() {
+                    if let Ok(settings3) = settings.cast::<ICoreWebView2Settings3>() {
+                        let _ = settings3.SetAreBrowserAcceleratorKeysEnabled(false);
+                    }
+                }
+            }
+        }
+    });
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(SummaryTask::default())
+        .setup(|_app| {
+            #[cfg(windows)]
+            disable_browser_accelerator_keys(_app);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_os_username,
             get_launch_path,

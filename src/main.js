@@ -38,6 +38,9 @@ const STOP_BUTTON_ARM_MS = 800;
 const RECENT_FILES_KEY = "pdfAnnotator.recentFiles";
 const MAX_RECENT_FILES = 8;
 const MAX_LOG_ENTRIES = 200;
+// The window/titlebar title with no document open — matches
+// tauri.conf.json's configured title and index.html's #titlebarTitle text.
+const DEFAULT_WINDOW_TITLE = "দাগ — Daag";
 // Frequency-ranked short review phrases surfaced on right-click / Q in the
 // viewer — see the "Quick comments" section below. Never seeded.
 const QUICK_COMMENTS_KEY = "pdfAnnotator.quickComments";
@@ -715,7 +718,7 @@ frame.src = "pdfjs/web/viewer.html";
 // to be opened. Idempotent on a genuine fresh launch too, since
 // tauri.conf.json's configured window title is already "দাগ — Daag".
 getCurrentWindow()
-  .setTitle("দাগ — Daag")
+  .setTitle(DEFAULT_WINDOW_TITLE)
   .catch((err) => console.error("Could not reset window title:", err));
 
 // ---- Custom titlebar: window controls -------------------------------
@@ -887,19 +890,93 @@ titlebarThemeBtn.addEventListener("click", () => {
 
 applyTheme(currentTheme);
 
-// ---- Ctrl+W: same reload Ctrl+R/F5 already do natively -------------------
-// Ctrl+R/F5 aren't ours — they're WebView2's own reload accelerator,
-// handled above the DOM entirely, so they work everywhere regardless of
-// focus. Ctrl+W has no such native binding here (that's a browser-tab-strip
-// shortcut Edge itself owns, not something an embedded WebView2 control
-// implements), so we bind it ourselves to do the exact same thing:
-// window.location.reload() fires the same beforeunload sequence a native
-// reload does, so the existing unsaved-changes guard (bottom of this file)
-// applies for free — no separate dirty check needed here.
-function reloadWindow(event) {
-  event.preventDefault();
-  event.stopPropagation();
-  window.location.reload();
+// ---- Blocking WebView2's reload accelerators (F5 / Ctrl+R) --------------
+// The real block is Rust-side (disable_browser_accelerator_keys in
+// src-tauri/src/main.rs turns off AreBrowserAcceleratorKeysEnabled) — the
+// webview host acts on these above the DOM, so historically a JS
+// preventDefault couldn't stop them. This capture-phase guard is
+// belt-and-braces: it covers `vite` dev (no Tauri webview settings) and any
+// runtime where that COM call doesn't take. Ctrl+R/F5/Ctrl+Shift+R only.
+function blockReloadKeys(target) {
+  target.addEventListener(
+    "keydown",
+    (event) => {
+      const isCtrlR =
+        (event.ctrlKey || event.metaKey) && !event.altKey && event.key?.toLowerCase() === "r";
+      if (event.key === "F5" || isCtrlR) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    },
+    { capture: true }
+  );
+}
+blockReloadKeys(window);
+
+// ---- Ctrl+W: close the current document, back to the landing screen -----
+// Reload (Ctrl+R/F5) used to double as "close" only because startup doesn't
+// auto-reopen the last file — but it *does* reopen a file passed on the
+// command line / via Explorer's "Open with" (get_launch_path in the module
+// init below), so there Ctrl+W just silently reloaded the same document
+// straight back (and reload is blocked now anyway, see above). This is a
+// real in-app close instead: flush any pending save (this app's whole
+// premise is that disk never lags the screen), drop the pdf.js document,
+// reset session state, and show the landing screen. No-op when already on
+// the landing screen.
+let closeInFlight = false;
+async function closeCurrentPdf(event) {
+  event?.preventDefault();
+  event?.stopPropagation();
+  if (!currentPath || closeInFlight) return;
+  closeInFlight = true;
+  try {
+    const closedName = filenameFromPath(currentPath);
+
+    if (dirty) await saveNow({ force: true });
+    clearTimeout(autosaveTimer);
+    closeQuickCommentMenu();
+
+    try {
+      await getViewerApp()?.close();
+    } catch (err) {
+      console.error("Could not close the pdf.js document:", err);
+    }
+
+    currentPath = null;
+    dirty = false;
+    sessionOriginalBytes = null;
+    summaryCache = null;
+    folderPdfDir = null;
+    folderPdfList = [];
+    folderPdfIndex = -1;
+    currentTitleBase = null;
+
+    if (toolbarSaveButton) toolbarSaveButton.disabled = true;
+    if (toolbarUndoAllButton) toolbarUndoAllButton.disabled = true;
+    if (toolbarExportCommentsButton) toolbarExportCommentsButton.disabled = true;
+    if (toolbarSummarizeCommentsButton) toolbarSummarizeCommentsButton.disabled = true;
+    titlebarPrevBtn.disabled = true;
+    titlebarNextBtn.disabled = true;
+
+    viewerScreen.classList.add("hidden");
+    landingScreen.classList.remove("hidden");
+    titlebarDocActionsEl.classList.add("hidden");
+    landingStatusEl.textContent = "";
+    landingStatusEl.className = "";
+    titlebarTitleEl.textContent = DEFAULT_WINDOW_TITLE;
+    titlebarTitleEl.title = "";
+    getCurrentWindow()
+      .setTitle(DEFAULT_WINDOW_TITLE)
+      .catch((err) => console.error("Could not reset window title:", err));
+    updateTitlebarChrome();
+    renderRecentFiles();
+    // Focus was on the iframe (see showViewer) — move it to the landing
+    // screen so it isn't stranded on a now-hidden element.
+    openBtn.focus();
+    setStatus(`Closed ${closedName}`, "");
+  } finally {
+    closeInFlight = false;
+  }
 }
 
 // Attached at the parent-document level (in addition to the iframe-scoped
@@ -908,7 +985,7 @@ function reloadWindow(event) {
 // scoped only inside it would never see this key while no file is open.
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key?.toLowerCase() === "w") {
-    reloadWindow(event);
+    closeCurrentPdf(event);
   }
 });
 
@@ -1322,7 +1399,7 @@ function attachKeyboardShortcuts(doc) {
           event.stopPropagation();
           saveNow({ force: true });
         } else if (event.key?.toLowerCase() === "w") {
-          reloadWindow(event);
+          closeCurrentPdf(event);
         }
         return;
       }
@@ -1912,6 +1989,7 @@ async function initializeViewer() {
   injectSummarizeCommentsButton();
   injectSaveButton();
   blockInternalFileOpen(frame.contentDocument);
+  blockReloadKeys(frame.contentDocument);
   attachKeyboardShortcuts(frame.contentDocument);
   attachQuickCommentMenu(frame.contentDocument);
   attachDragDropOpen();
