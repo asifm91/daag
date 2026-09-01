@@ -572,6 +572,35 @@ commands of our own — the plugins expose everything.
   pending — "দাগ v1.2.0 — v1.3.0 available"); it throws outside a Tauri
   context (plain `vite` dev), handled.
 
+### Changelog & release notes
+`CHANGELOG.md` (repo root, Keep a Changelog format) is the **single
+source** for both the GitHub release body and the website's changelog
+page — don't hand-edit either output.
+- **Format** — one `## [x.y.z] — YYYY-MM-DD` heading per release, `###
+  Added`/`### Changed` groups, `- ` list items (Markdown `**bold**` /
+  `` `code` `` / `[links](url)` plus inline HTML like `<kbd>` are
+  rendered). A `## [Unreleased]` section stays at the top (each release
+  bump renames it and adds a fresh empty one); it's kept in the file but
+  left off the website. Reference-style `[x.y.z]: <url>` definitions at
+  the bottom become the "see release →" links.
+- **Website** — `scripts/build-changelog.mjs` (run via `bun run
+  changelog`) renders `CHANGELOG.md` into `docs/changelog.html` using the
+  same page chrome as the other `docs/` pages. Dependency-free parser (the
+  format is small and controlled). `--check` mode exits non-zero if the
+  committed HTML is stale — the `verify` job runs it, so a release fails if
+  you edited `CHANGELOG.md` without rerunning the script. **The generated
+  `docs/changelog.html` is committed** (GitHub Pages serves `docs/` as-is,
+  no build step).
+- **Release body** — `release.yml`'s `finalize` job (`needs: build`, runs
+  once after every platform) `awk`-slices the current version's section
+  out of `CHANGELOG.md`, appends `.github/release-body-footer.md` (the
+  evergreen download list + macOS Gatekeeper note), and sets it with `gh
+  release edit`. `tauri-action`'s inline `releaseBody` is just a
+  `"Publishing release notes…"` placeholder — each matrix job would
+  otherwise race to set it. The `verify` job fails early if
+  `CHANGELOG.md` has no section matching `tauri.conf.json`'s version, same
+  spirit as the tag/version check.
+
 ### Windows long paths (> MAX_PATH)
 Dragging a PDF whose absolute path exceeds ~259 chars onto the window is
 *silently refused by Explorer* — the shell rejects the drop before any

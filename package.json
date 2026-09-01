@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "changelog": "node scripts/build-changelog.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",
