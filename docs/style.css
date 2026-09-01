@@ -473,6 +473,35 @@ footer .row {
   text-decoration: none;
 }
 
+/* framed screenshot inside a guide section */
+figure.shot-fig {
+  margin: 0 0 20px;
+}
+figure.shot-fig img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+figure.shot-fig figcaption {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+figure.shot-fig figcaption b {
+  color: var(--fg);
+  font-weight: 600;
+}
+/* the toolbar strip is a small source image — show it a little larger
+   than natural for legibility, but cap so it never blurs badly. */
+figure.shot-fig.toolbar img {
+  width: 500px;
+  padding: 8px 10px;
+  image-rendering: -webkit-optimize-contrast;
+}
+
 /* keyboard-shortcut table */
 .keys {
   width: 100%;
