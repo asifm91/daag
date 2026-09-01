@@ -246,6 +246,49 @@
       #summaryDialogNotice { margin: 0; padding: 8px 16px; font-size: 12px; color: var(--fg-muted); border-top: 1px solid var(--border); }
       #summaryDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
       #summaryDialogFooter button { padding: 6px 14px; font-size: 13px; }
+
+      /* ---- Quick comment menu: right-click / Q in the viewer. A
+         parent-document overlay (not injected into the pdf.js iframe) so it
+         uses the app's theme tokens directly and isn't subject to
+         viewer.html's inline-style CSP. See the "Quick comments" section in
+         main.js. ---- */
+      /* [hidden] needs to win over the explicit display below — an author
+         `display` otherwise overrides the UA stylesheet's [hidden] rule. */
+      #quickCommentMenu[hidden] { display: none; }
+      #quickCommentMenu {
+        position: fixed; z-index: 2000; box-sizing: border-box;
+        min-width: 220px; max-width: 340px;
+        display: flex; flex-direction: column;
+        background: var(--surface-2); color: var(--fg);
+        border: 1px solid var(--border-strong); border-radius: 6px;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+        padding: 4px;
+      }
+      #quickCommentMenuList { display: flex; flex-direction: column; max-height: min(50vh, 360px); overflow-y: auto; }
+      #quickCommentMenu .qcItem {
+        display: block; width: 100%;
+        padding: 6px 8px; border: none; border-radius: 4px;
+        background: none; color: inherit; font: inherit; font-size: 13px;
+        text-align: left; cursor: pointer;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      #quickCommentMenu .qcItem:hover, #quickCommentMenu .qcItem:focus { background: var(--surface-hover); outline: none; }
+      #quickCommentMenu .qcEmpty { padding: 8px; font-size: 12px; color: var(--fg-muted); }
+      #quickCommentMenu .qcDivider { flex: 0 0 auto; height: 1px; margin: 4px 2px; background: var(--border); }
+      #quickCommentInput {
+        box-sizing: border-box; width: 100%; margin-top: 2px;
+        padding: 6px 8px; font: inherit; font-size: 13px;
+        background: var(--input-bg); color: var(--fg);
+        border: 1px solid var(--border-strong); border-radius: 4px;
+      }
+      #quickCommentInput:focus { outline: 1px solid var(--border-strong); }
+
+      #quickCommentsManageList { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; }
+      #quickCommentsManageList li { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+      #quickCommentsManageList .qcManageText { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #quickCommentsManageList .qcManageCount { flex: 0 0 auto; color: var(--fg-muted); }
+      #quickCommentsManageList .qcManageDelete { flex: 0 0 auto; padding: 2px 8px; font-size: 11px; }
+      #quickCommentsManageList .qcManageEmpty { color: var(--fg-muted); }
     </style>
   </head>
   <body>
@@ -400,6 +443,17 @@
           <option value="ask">Ask each time</option>
           <option value="copy">Always create a copy</option>
         </select>
+
+        <div id="quickCommentsRow">
+          <label>Quick comments</label>
+          <p class="settings-help">
+            Phrases offered when you right-click a page or press <code>Q</code>
+            in the viewer, most-used first. They're added as you use them, and
+            when exporting or summarizing surfaces a comment that repeats within
+            a document. Nothing is pre-filled.
+          </p>
+          <ul id="quickCommentsManageList"></ul>
+        </div>
 
         <div id="longPathRow" hidden>
           <label>Windows long path support</label>

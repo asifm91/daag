@@ -38,6 +38,10 @@ const STOP_BUTTON_ARM_MS = 800;
 const RECENT_FILES_KEY = "pdfAnnotator.recentFiles";
 const MAX_RECENT_FILES = 8;
 const MAX_LOG_ENTRIES = 200;
+// Frequency-ranked short review phrases surfaced on right-click / Q in the
+// viewer — see the "Quick comments" section below. Never seeded.
+const QUICK_COMMENTS_KEY = "pdfAnnotator.quickComments";
+const MAX_QUICK_COMMENT_MENU_ITEMS = 12;
 const COMMENTER_NAME_KEY = "pdfAnnotator.commenterName";
 const OPEN_MODE_KEY = "pdfAnnotator.openMode"; // "overwrite" | "ask" | "copy"
 const COPY_MAPPINGS_KEY = "pdfAnnotator.copyMappings";
@@ -109,6 +113,7 @@ const settingsDialogCancelButtonEl = document.getElementById("settingsDialogCanc
 const settingsDialogSaveButtonEl = document.getElementById("settingsDialogSaveButton");
 const commenterNameInputEl = document.getElementById("commenterNameInput");
 const openModeSelectEl = document.getElementById("openModeSelect");
+const quickCommentsManageListEl = document.getElementById("quickCommentsManageList");
 const longPathRowEl = document.getElementById("longPathRow");
 const longPathStatusEl = document.getElementById("longPathStatus");
 const enableLongPathButtonEl = document.getElementById("enableLongPathButton");
@@ -379,6 +384,7 @@ function openSettingsDialog() {
   aiApiKeyInputEl.value = getAiApiKey();
   aiSystemPromptInputEl.value = getAiSystemPrompt();
   renderAiModelDatalist();
+  renderQuickCommentsManageList();
   refreshLongPathStatus(); // fire-and-forget; fills in the status line async
   settingsDialogEl.showModal();
   commenterNameInputEl.focus();
@@ -630,6 +636,11 @@ function showViewer() {
   viewerScreen.classList.remove("hidden");
   titlebarDocActionsEl.classList.remove("hidden");
   updateTitlebarChrome();
+  // The iframe doesn't take focus just by becoming visible, so the
+  // shortcut keys (attachKeyboardShortcuts, bound on frame.contentDocument)
+  // and pdf.js's own key handling would stay dead until the first click
+  // inside it. Hand it focus now.
+  frame.contentWindow?.focus();
 }
 
 // ---- Configuring the embedded pdf.js viewer ----------------------------
@@ -1341,6 +1352,20 @@ function attachKeyboardShortcuts(doc) {
         return;
       }
 
+      // Q: open the quick-comment menu at the pointer (see the "Quick
+      // comments" section). lastIframePointer is kept by
+      // attachQuickCommentMenu's mousemove listener.
+      if (key === "q") {
+        event.preventDefault();
+        event.stopPropagation();
+        const p = lastIframePointer || {
+          x: doc.documentElement.clientWidth / 2,
+          y: doc.documentElement.clientHeight / 2,
+        };
+        openQuickCommentMenu(p.x, p.y);
+        return;
+      }
+
       const buttonId = TOOL_BUTTON_ID_BY_KEY[key];
       if (!buttonId) return;
       const button = doc.getElementById(buttonId);
@@ -1888,6 +1913,7 @@ async function initializeViewer() {
   injectSaveButton();
   blockInternalFileOpen(frame.contentDocument);
   attachKeyboardShortcuts(frame.contentDocument);
+  attachQuickCommentMenu(frame.contentDocument);
   attachDragDropOpen();
   disableInternalBeforeUnloadPrompt(app);
   addShortcutHints(frame.contentDocument);
@@ -2385,6 +2411,485 @@ async function stripAllAnnotations(app) {
   );
 }
 
+// ---- Quick comments (right-click / Q in the viewer) --------------------
+// A frequency-ranked list of short review phrases ("not clear", "make it
+// brief", "does not make sense") the user reaches for again and again.
+// Right-clicking anywhere on a page — or pressing Q — opens a small menu of
+// them, most-used first; a pick drops that phrase onto the document as a
+// pdf.js comment with no dialog in between. The list is never seeded:
+// entries appear when the user first types one into the menu's input, and
+// when exporting/summarizing surfaces a phrase that repeats within a single
+// document (harvestRepeatedComments).
+//
+// pdf.js 6.x has no standalone/sticky-note comment editor — every comment
+// rides a host editor. So each of the three placement cases ends with the
+// same operation the real comment dialog performs, `editor.comment = text`
+// (web/viewer.mjs CommentDialog#save), on a freshly created Highlight
+// editor:
+//   1. text is selected            -> uiManager.commentSelection() over it
+//   2. no selection, pointer over page text
+//                                  -> synthesize a one-character selection
+//                                     there, then (1)
+//   3. pointer over blank page area -> build a ~1-glyph Highlight box at the
+//                                     pointer via layer.createAndAddNewEditor()
+// (1) and (2) reuse pdf.js's own vetted selection->boxes->layer path
+// wholesale; only (3) pokes at layer internals, via the public getLayer()
+// and createAndAddNewEditor() (same tier as the commentSelection() call the
+// C shortcut already leans on). An empty comment never reaches the document
+// because the phrase is always chosen *before* the annotation is created —
+// there's no create-then-cancel window to leave an orphan highlight.
+
+function getQuickComments() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(QUICK_COMMENTS_KEY));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((e) => e && typeof e.text === "string" && e.text.trim())
+      .map((e) => ({
+        text: e.text.trim(),
+        count: Number.isFinite(e.count) && e.count > 0 ? e.count : 1,
+        lastUsedAt: Number.isFinite(e.lastUsedAt) ? e.lastUsedAt : 0,
+      }))
+      .sort((a, b) => b.count - a.count || b.lastUsedAt - a.lastUsedAt);
+  } catch {
+    return [];
+  }
+}
+
+function saveQuickComments(list) {
+  localStorage.setItem(QUICK_COMMENTS_KEY, JSON.stringify(list));
+}
+
+// Bump an existing phrase's frequency (case-insensitive, trimmed match) or
+// add it fresh at count 1. Called on every menu pick and by
+// harvestRepeatedComments().
+function recordQuickComment(rawText) {
+  const text = (rawText || "").trim();
+  if (!text) return;
+  const list = getQuickComments();
+  const key = text.toLowerCase();
+  const existing = list.find((e) => e.text.toLowerCase() === key);
+  if (existing) {
+    existing.count += 1;
+    existing.lastUsedAt = Date.now();
+  } else {
+    list.push({ text, count: 1, lastUsedAt: Date.now() });
+  }
+  saveQuickComments(list);
+  if (settingsDialogEl.open) renderQuickCommentsManageList();
+}
+
+// Fold a document's own repeated comments into the quick list — a comment
+// that appears two or more times in the same export/summary is, by
+// definition, a phrase the user reuses. One increment per distinct repeated
+// phrase per call (exporting the same file twice bumps it twice; acceptable
+// — menu picks are the primary ranking signal). Length is not a filter.
+function harvestRepeatedComments(entries) {
+  const counts = new Map();
+  for (const entry of entries || []) {
+    const text = (entry.comment || "").trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    const cur = counts.get(key);
+    if (cur) cur.count += 1;
+    else counts.set(key, { text, count: 1 });
+  }
+  for (const { text, count } of counts.values()) {
+    if (count >= 2) recordQuickComment(text);
+  }
+}
+
+// ---- Quick comment menu (parent-document overlay) ---------------------
+// Built lazily and reused. Lives in the parent document (not the iframe) so
+// it gets the app's theme tokens for free and dodges pdf.js's viewer.html
+// CSP, which drops inline styles. Positions are computed in the iframe
+// document's client coordinates (both entry points — the capture-phase
+// contextmenu listener and the Q shortcut — originate there); the frame's
+// own offset is added when placing the menu.
+let quickCommentMenuEl = null;
+let quickCommentInputEl = null;
+let quickCommentMenuPointer = null; // {x, y} in iframe client coords, for the pending insert
+let quickCommentMenuOpenedAt = 0;
+// Last pointer position seen inside the iframe, in its client coords. Q
+// uses this; a Q with no pointer yet falls back to the iframe centre.
+let lastIframePointer = null;
+
+function buildQuickCommentMenu() {
+  if (quickCommentMenuEl) return;
+  const menu = document.createElement("div");
+  menu.id = "quickCommentMenu";
+  menu.hidden = true;
+  menu.setAttribute("role", "menu");
+
+  const list = document.createElement("div");
+  list.id = "quickCommentMenuList";
+
+  const divider = document.createElement("div");
+  divider.className = "qcDivider";
+
+  const input = document.createElement("input");
+  input.id = "quickCommentInput";
+  input.type = "text";
+  input.autocomplete = "off";
+  input.placeholder = "Add comment…";
+  input.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      const value = input.value.trim();
+      if (value) chooseQuickComment(value);
+    } else if (event.key === "Escape") {
+      closeQuickCommentMenu();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      const items = list.querySelectorAll(".qcItem");
+      if (items.length) items[items.length - 1].focus();
+    }
+  });
+
+  menu.append(list, divider, input);
+  document.body.append(menu);
+  quickCommentMenuEl = menu;
+  quickCommentInputEl = input;
+}
+
+function renderQuickCommentMenuItems() {
+  const listEl = quickCommentMenuEl.querySelector("#quickCommentMenuList");
+  const entries = getQuickComments().slice(0, MAX_QUICK_COMMENT_MENU_ITEMS);
+  if (!entries.length) {
+    const empty = document.createElement("div");
+    empty.className = "qcEmpty";
+    empty.textContent = "No saved phrases yet — type one below.";
+    listEl.replaceChildren(empty);
+    return;
+  }
+  listEl.replaceChildren(
+    ...entries.map((entry) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "qcItem";
+      item.setAttribute("role", "menuitem");
+
+      const text = document.createElement("span");
+      text.className = "qcText";
+      text.textContent = entry.text;
+      text.title = entry.text;
+
+      // Frequency (entry.count) only drives the sort order above — never
+      // shown in the menu.
+      item.append(text);
+      item.addEventListener("click", () => chooseQuickComment(entry.text));
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          const next = item.nextElementSibling;
+          if (next && next.classList.contains("qcItem")) next.focus();
+          else quickCommentInputEl.focus();
+        } else if (event.key === "ArrowUp") {
+          event.preventDefault();
+          const prev = item.previousElementSibling;
+          if (prev && prev.classList.contains("qcItem")) prev.focus();
+        } else if (event.key === "Escape") {
+          closeQuickCommentMenu();
+        }
+      });
+      return item;
+    })
+  );
+}
+
+function openQuickCommentMenu(clientX, clientY) {
+  if (!getViewerApp()?.pdfDocument || !currentPath) return;
+  buildQuickCommentMenu();
+  quickCommentMenuPointer = { x: clientX, y: clientY };
+  renderQuickCommentMenuItems();
+  quickCommentInputEl.value = "";
+
+  const menu = quickCommentMenuEl;
+  menu.hidden = false;
+  quickCommentMenuOpenedAt = Date.now();
+
+  const frameRect = frame.getBoundingClientRect();
+  let x = frameRect.left + clientX;
+  let y = frameRect.top + clientY;
+  const rect = menu.getBoundingClientRect();
+  if (x + rect.width > window.innerWidth - 8) x = window.innerWidth - 8 - rect.width;
+  if (y + rect.height > window.innerHeight - 8) y = window.innerHeight - 8 - rect.height;
+  menu.style.left = `${Math.max(8, x)}px`;
+  menu.style.top = `${Math.max(8, y)}px`;
+
+  quickCommentInputEl.focus();
+}
+
+function closeQuickCommentMenu() {
+  if (!quickCommentMenuEl || quickCommentMenuEl.hidden) return;
+  // Opening the menu parked focus on its input, which lives in the *parent*
+  // document. Hiding the menu drops that focus onto the parent <body>, out
+  // of the iframe — so attachKeyboardShortcuts (bound on
+  // frame.contentDocument) and pdf.js's own key handling both go deaf until
+  // something inside the iframe is clicked. Hand focus back to the iframe
+  // whenever the menu had it.
+  const menuHadFocus = quickCommentMenuEl.contains(document.activeElement);
+  quickCommentMenuEl.hidden = true;
+  if (menuHadFocus) frame.contentWindow?.focus();
+}
+
+function chooseQuickComment(text) {
+  const pointer = quickCommentMenuPointer;
+  closeQuickCommentMenu();
+  recordQuickComment(text);
+  insertQuickComment(text, pointer).catch((err) => {
+    console.error("Quick comment failed:", err);
+    setStatus("Couldn't add the comment", "error", { toast: true });
+  });
+}
+
+// ---- Placing a quick comment on the document -------------------------
+async function insertQuickComment(text, pointer) {
+  const phrase = (text || "").trim();
+  if (!phrase) return;
+  const app = getViewerApp();
+  const uiManager = app?.pdfViewer?._layerProperties?.annotationEditorUIManager;
+  if (!uiManager || !app?.pdfDocument) return;
+  const iwin = frame.contentWindow;
+  const idoc = frame.contentDocument;
+
+  const selection = iwin.getSelection();
+  const hasRealSelection =
+    selection &&
+    selection.rangeCount > 0 &&
+    !selection.isCollapsed &&
+    selection.toString().trim().length > 0;
+
+  // Case 1: comment on whatever text is selected.
+  if (hasRealSelection) {
+    applyCommentOverSelection(uiManager, phrase);
+    return;
+  }
+
+  if (!pointer) {
+    setStatus("Select text, or right-click on a page, to add a comment", "error", {
+      toast: true,
+    });
+    return;
+  }
+
+  // Case 2: no selection, but there's page text under the pointer — anchor
+  // a one-character selection to it and fall through to the same path.
+  const range = caretRangeAtPoint(idoc, pointer.x, pointer.y);
+  const anchorNode = range?.startContainer;
+  const inTextLayer =
+    anchorNode?.nodeType === 3 && anchorNode.parentElement?.closest(".textLayer");
+  if (range && inTextLayer && widenRangeToOneChar(range)) {
+    selection.removeAllRanges();
+    selection.addRange(range);
+    applyCommentOverSelection(uiManager, phrase);
+    return;
+  }
+
+  // Case 3: genuinely blank page area — synthetic Highlight box.
+  await applyCommentAtBlankPoint(uiManager, idoc, iwin, pointer, phrase);
+}
+
+function caretRangeAtPoint(doc, x, y) {
+  if (doc.caretRangeFromPoint) return doc.caretRangeFromPoint(x, y);
+  if (doc.caretPositionFromPoint) {
+    const pos = doc.caretPositionFromPoint(x, y);
+    if (!pos) return null;
+    const r = doc.createRange();
+    r.setStart(pos.offsetNode, pos.offset);
+    r.collapse(true);
+    return r;
+  }
+  return null;
+}
+
+// caretRangeFromPoint returns a collapsed range at a character boundary;
+// widen it to cover one glyph so highlightSelection() has a non-empty
+// selection to work with. Returns false if the node has no text to cover.
+function widenRangeToOneChar(range) {
+  const node = range.startContainer;
+  const len = node.textContent?.length ?? 0;
+  if (len === 0) return false;
+  const off = range.startOffset;
+  if (off < len) range.setEnd(node, off + 1);
+  else range.setStart(node, off - 1);
+  return !range.collapsed;
+}
+
+// Wrap uiManager.editComment just long enough to catch the editor pdf.js
+// creates for the current selection and set its text directly, so the
+// comment dialog never actually opens. commentSelection() ->
+// highlightSelection() does the selection->boxes->layer work and, when
+// starting from NONE mode, an async switchToMode() first — hence the
+// generous restore timeout. If it bails (selection not inside a text
+// layer, etc.) the wrapper is never called and the timeout restores the
+// original method.
+function applyCommentOverSelection(uiManager, phrase) {
+  const originalEditComment = uiManager.editComment.bind(uiManager);
+  let settled = false;
+  const settle = (editor) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    uiManager.editComment = originalEditComment;
+    if (editor) {
+      try {
+        editor.comment = phrase;
+        markDirty();
+      } catch (err) {
+        console.error("Couldn't attach quick comment, removing host highlight:", err);
+        try {
+          editor.remove();
+        } catch {
+          /* best effort */
+        }
+      }
+    }
+  };
+  const timer = setTimeout(() => settle(null), 3000);
+  uiManager.editComment = (editor) => settle(editor);
+  try {
+    uiManager.commentSelection("context_menu");
+  } catch (err) {
+    settle(null);
+    throw err;
+  }
+}
+
+async function applyCommentAtBlankPoint(uiManager, idoc, iwin, pointer, phrase) {
+  const AET = iwin.pdfjsLib.AnnotationEditorType;
+  const pageEl = idoc.elementFromPoint(pointer.x, pointer.y)?.closest(".page");
+  if (!pageEl?.dataset.pageNumber) {
+    setStatus("Point inside a page to add a comment", "error", { toast: true });
+    return;
+  }
+  const pageIndex = Number(pageEl.dataset.pageNumber) - 1;
+  if (uiManager.getMode() !== AET.HIGHLIGHT) await uiManager.updateMode(AET.HIGHLIGHT);
+
+  const layer = uiManager.getLayer(pageIndex);
+  if (!layer) return;
+
+  // boxes are normalised [0,1] to the page rect (pdf.mjs
+  // AnnotationEditorUIManager#getSelectionBoxes); width/height here is
+  // roughly one glyph at a typical zoom.
+  const rect = pageEl.getBoundingClientRect();
+  const nx = Math.min(0.985, Math.max(0, (pointer.x - rect.left) / rect.width));
+  const ny = Math.min(0.985, Math.max(0, (pointer.y - rect.top) / rect.height));
+  const editor = layer.createAndAddNewEditor({ x: 0, y: 0 }, false, {
+    methodOfCreation: "context_menu",
+    boxes: [{ x: nx, y: ny, width: 0.012, height: 0.016 }],
+    anchorNode: null,
+    anchorOffset: 0,
+    focusNode: null,
+    focusOffset: 0,
+    text: "",
+  });
+  if (editor) {
+    try {
+      editor.comment = phrase;
+      markDirty();
+    } catch (err) {
+      console.error("Couldn't attach quick comment, removing host highlight:", err);
+      try {
+        editor.remove();
+      } catch {
+        /* best effort */
+      }
+    }
+  }
+}
+
+// Wired once from initializeViewer(). Capture-phase so it beats pdf.js's
+// own listeners, same technique as blockInternalFileOpen/
+// attachKeyboardShortcuts.
+let quickCommentMenuAttached = false;
+function attachQuickCommentMenu(doc) {
+  if (quickCommentMenuAttached) return;
+  quickCommentMenuAttached = true;
+
+  doc.addEventListener(
+    "mousemove",
+    (event) => {
+      lastIframePointer = { x: event.clientX, y: event.clientY };
+    },
+    { capture: true, passive: true }
+  );
+
+  doc.addEventListener(
+    "contextmenu",
+    (event) => {
+      if (!getViewerApp()?.pdfDocument || !currentPath) return; // no doc — native menu
+      if (!event.target?.closest?.(".page")) return; // gutter / toolbar — native menu
+      event.preventDefault();
+      event.stopPropagation();
+      lastIframePointer = { x: event.clientX, y: event.clientY };
+      openQuickCommentMenu(event.clientX, event.clientY);
+    },
+    { capture: true }
+  );
+
+  // Dismiss on any interaction outside the menu, or when focus/layout moves.
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (!quickCommentMenuEl || quickCommentMenuEl.hidden) return;
+      if (event.composedPath?.().includes(quickCommentMenuEl)) return;
+      closeQuickCommentMenu();
+    },
+    { capture: true }
+  );
+  doc.addEventListener("pointerdown", () => closeQuickCommentMenu(), { capture: true });
+  doc.addEventListener("scroll", () => closeQuickCommentMenu(), { capture: true });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeQuickCommentMenu();
+  });
+  window.addEventListener("blur", () => {
+    // Ignore the transient blur that opening + focusing the menu can cause.
+    if (Date.now() - quickCommentMenuOpenedAt > 250) closeQuickCommentMenu();
+  });
+  window.addEventListener("resize", () => closeQuickCommentMenu());
+}
+
+// ---- Quick comments management list (Settings) -----------------------
+function renderQuickCommentsManageList() {
+  if (!quickCommentsManageListEl) return;
+  const list = getQuickComments();
+  if (!list.length) {
+    const li = document.createElement("li");
+    li.className = "qcManageEmpty";
+    li.textContent = "None yet.";
+    quickCommentsManageListEl.replaceChildren(li);
+    return;
+  }
+  quickCommentsManageListEl.replaceChildren(
+    ...list.map((entry) => {
+      const li = document.createElement("li");
+
+      const text = document.createElement("span");
+      text.className = "qcManageText";
+      text.textContent = entry.text;
+      text.title = entry.text;
+
+      const count = document.createElement("span");
+      count.className = "qcManageCount";
+      count.textContent = `×${entry.count}`;
+
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "qcManageDelete";
+      del.textContent = "Remove";
+      del.addEventListener("click", () => {
+        const key = entry.text.toLowerCase();
+        saveQuickComments(getQuickComments().filter((e) => e.text.toLowerCase() !== key));
+        renderQuickCommentsManageList();
+      });
+
+      li.append(text, count, del);
+      return li;
+    })
+  );
+}
+
 // ---- Exporting comments to Markdown --------------------------------------
 // Pulls every commented annotation (Highlight/Underline/StrikeOut/Squiggly/
 // Ink/Stamp/FreeText — anything with actual comment text, see below) out of
@@ -2493,6 +2998,7 @@ async function exportComments() {
 
   setStatus("Preparing comment export…");
   const entries = await collectCommentedAnnotations(app);
+  harvestRepeatedComments(entries);
   if (entries.length === 0) {
     setStatus("No comments found in this document", "", { toast: true });
     return;
@@ -2751,6 +3257,7 @@ async function runSummary() {
   try {
     const entries = await collectCommentedAnnotations(app);
     if (runId !== summaryRunId) return; // stopped while collecting
+    harvestRepeatedComments(entries);
     if (entries.length === 0) {
       summaryCache = null;
       renderSummaryError("This document has no comments to summarize.");

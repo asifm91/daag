@@ -254,6 +254,75 @@ plain `white-space:pre-wrap` box, no Markdown renderer in the app.
   provider (LM Studio, OpenRouter, OpenAI) works by changing those
   fields.
 
+### Quick comments (right-click / Q)
+A frequency-ranked list of short review phrases ("not clear", "make it
+brief", …) the user reuses across documents. Right-clicking anywhere on a
+page — or pressing **Q** — opens a small menu of them, most-used first; a
+pick drops that phrase onto the document as a pdf.js comment with **no
+dialog**. All in `main.js`'s "Quick comments" section.
+- **Storage** — `localStorage["pdfAnnotator.quickComments"]`, an array of
+  `{ text, count, lastUsedAt }` sorted `count desc, lastUsedAt desc`. Menu
+  shows the top `MAX_QUICK_COMMENT_MENU_ITEMS` (12) phrase texts only —
+  `count` drives the sort but is never shown there (it does show, as `×N`,
+  in the Settings list). **Never seeded.**
+  Entries appear two ways: typing one into the menu's own input, and
+  `harvestRepeatedComments()` — called from `exportComments()` and
+  `runSummary()` — which folds in any comment that appears **≥ 2 times**
+  within that one document (length is not a filter). `recordQuickComment()`
+  does the case-insensitive-trimmed dedupe/increment. Settings has a
+  management list (`#quickCommentsManageList`) with per-entry Remove; edits
+  there apply immediately, not on Save.
+- **The context-menu override** — a capture-phase `contextmenu` listener on
+  `frame.contentDocument` (same technique as `blockInternalFileOpen` /
+  `attachKeyboardShortcuts`), in `attachQuickCommentMenu()`, wired from
+  `initializeViewer()`. Only fires over `.page` (right-clicking the gutter
+  or toolbar leaves the native menu alone) and only with a document open.
+  The menu itself is a **parent-document** overlay (`#quickCommentMenu` in
+  `index.html`), not injected into the iframe — so it uses the app's theme
+  tokens directly and isn't subject to viewer.html's inline-style CSP.
+  Positions come from the iframe document's client coords (both entry
+  points originate there); the frame's own offset is added when placing.
+  Because the menu's input is in the parent document, opening the menu
+  pulls keyboard focus out of the iframe — so `closeQuickCommentMenu()`
+  calls `frame.contentWindow.focus()` on every dismissal path (Escape,
+  click-away, pick, scroll) or the iframe-scoped shortcuts and pdf.js's own
+  key handling stay dead until the iframe is clicked.
+- **pdf.js 6.x has no standalone/sticky-note comment** — every comment
+  rides a host editor. So all three placement cases end with
+  `editor.comment = text` (the exact op `web/viewer.mjs`
+  `CommentDialog#save` performs) on a freshly created Highlight editor:
+  1. **text selected** → `uiManager.commentSelection("context_menu")` over
+     it, with `uiManager.editComment` transiently wrapped so our wrapper
+     catches the editor pdf.js creates and sets its text directly — the
+     dialog never opens. A 3s timeout restores the original method if
+     `highlightSelection()` bails (selection not in a text layer, etc.).
+  2. **no selection, pointer over page text** → synthesize a
+     one-character `Range` at the pointer (`caretRangeFromPoint`, widened),
+     install it as the iframe selection, then fall through to (1).
+  3. **pointer over blank page area** → `uiManager.getLayer(pageIndex)` +
+     `layer.createAndAddNewEditor({ boxes: [{x,y,width:0.012,height:0.016}],
+     anchorNode: null, … })` after `await uiManager.updateMode(HIGHLIGHT)`.
+     `boxes` are normalised `[0,1]` to the page rect (matching pdf.mjs's
+     own `#getSelectionBoxes`). `#createOutlines()` only reads `boxes`;
+     `anchorNode` is only ever touched in a null-guarded `#setCaret`, so
+     `null` is safe. This is the one case that pokes layer internals.
+  `commentSelection`/`highlightSelection`/`createAndAddNewEditor`/
+  `getLayer`/`updateMode`/`getMode` are all plain public methods (same tier
+  as the `commentSelection()` the C shortcut already uses). If a pdf.js
+  upgrade breaks this, re-verify those against the new bundled source.
+- **No empty-comment cleanup path is needed** — the phrase is always
+  chosen *before* the annotation is created (menu picks are non-empty; the
+  input's Enter handler checks), so there's no create-then-cancel window
+  that could leave an orphan highlight. The `editor.remove()` calls in the
+  `catch` blocks only fire if `editor.comment =` itself throws.
+- **A quick comment leaves pdf.js in HIGHLIGHT mode** (case 1/2 via
+  `commentSelection`'s own `switchToMode`; case 3 via our explicit
+  `updateMode(HIGHLIGHT)`), same as pdf.js's own floating comment button
+  and this app's `C` shortcut. Do **not** switch back to NONE afterwards:
+  `AnnotationEditorUIManager.keydown` only routes Ctrl+Z/Ctrl+Y to
+  undo/redo while `#mode !== NONE`, so an eager restore silently kills undo
+  for the annotation just created.
+
 ### Status/feedback: three channels, not a status bar
 There used to be a simple status bar; it's gone. `setStatus(text, kind,
 {toast})` in main.js now drives three things at once:
