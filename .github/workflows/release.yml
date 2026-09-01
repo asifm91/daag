@@ -16,7 +16,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # tauri-action derives the release tag from src-tauri/tauri.conf.json
+  # (tagName: v__VERSION__ below), NOT from the pushed git tag. If the two
+  # disagree, the build silently publishes to the *old* version's release
+  # instead of the tag you just pushed. Fail fast here so that can't happen.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Pushed tag must match tauri.conf.json version
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          expected="v${version}"
+          if [ "${{ github.ref_name }}" != "$expected" ]; then
+            echo "::error::Tag ${{ github.ref_name }} != $expected (src-tauri/tauri.conf.json version $version). Bump package.json, src-tauri/Cargo.toml, src-tauri/Cargo.lock and src-tauri/tauri.conf.json to match before tagging."
+            exit 1
+          fi
+          echo "Tag ${{ github.ref_name }} matches version $version."
+
   build:
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
