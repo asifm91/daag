@@ -78,10 +78,14 @@ jobs:
           # Signs the updater artifacts and generates latest.json. The
           # private key is the minisign key generated with
           # `tauri signer generate` (public half lives in
-          # tauri.conf.json > plugins.updater.pubkey). Password env is
-          # optional — empty when the key has none. See UPDATER.md.
+          # tauri.conf.json > plugins.updater.pubkey). The key was
+          # generated with an empty passphrase, so the password var is a
+          # literal "" — it still has to be *set* (an absent var makes the
+          # bundler fall through to an interactive prompt that hangs CI),
+          # but GitHub rejects empty secrets so it can't come from one.
+          # See UPDATER.md.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           # __VERSION__ is replaced with the version in src-tauri/tauri.conf.json
           tagName: v__VERSION__

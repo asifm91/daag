@@ -509,7 +509,11 @@ commands of our own — the plugins expose everything.
   `workflow_dispatch` run, which produces a **draft**, never feeds the
   updater until it's published). `pubkey` is the public half of the
   minisign keypair from `tauri signer generate`; the private half is the
-  `TAURI_SIGNING_PRIVATE_KEY` GitHub Actions secret. `bundle.
+  `TAURI_SIGNING_PRIVATE_KEY` GitHub Actions secret. There is no password
+  secret — the key has an empty passphrase and GitHub rejects empty
+  secret values, so `release.yml` hard-codes
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""` (it must be *set* to something
+  or the bundler drops to an interactive prompt that hangs CI). `bundle.
   createUpdaterArtifacts: true` makes the bundler emit and sign the
   updater artifacts; `tauri-action` with `includeUpdaterJson: true`
   (its default when signing keys are set — pinned in the workflow anyway)

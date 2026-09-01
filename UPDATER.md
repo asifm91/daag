@@ -27,18 +27,21 @@ The generated files are in the **gitignored** `.secrets/` directory:
 - `.secrets/daag_updater.key.pub` — the public key (already in the config)
 
 In the GitHub repo, go to **Settings → Secrets and variables → Actions →
-New repository secret** and add:
+New repository secret** and add just one:
 
 | Secret name | Value |
 | --- | --- |
 | `TAURI_SIGNING_PRIVATE_KEY` | the entire contents of `.secrets/daag_updater.key` |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | leave empty (the key was generated with no password) |
 
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` still has to exist as a secret even
-though it's empty, or the workflow's `env:` reference resolves to an
-empty string anyway — either is fine.
+There is **no password secret**. The key was generated with an empty
+passphrase, and GitHub doesn't allow empty secret values anyway — so
+`release.yml` sets `TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""` as a literal
+in the workflow. The variable still has to be *set* to something (an
+absent one makes the Tauri bundler fall through to an interactive
+password prompt, which hangs a CI job with no terminal); a literal `""`
+satisfies that and decrypts the empty-passphrase key.
 
-Once the secrets are set, the next tagged release (`git tag v1.x.y &&
+Once the secret is set, the next tagged release (`git tag v1.x.y &&
 git push --tags`, or a published `workflow_dispatch` run) will produce
 signed bundles plus a `latest.json`, and existing installs will offer the
 update.
