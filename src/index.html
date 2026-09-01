@@ -114,6 +114,58 @@
       #titlebar.titlebar-light .titlebarButton:hover { background: #e5e5e7; }
       #titlebar.titlebar-light #titlebarCloseBtn:hover { background: #e81123; color: #fff; }
 
+      /* ---- macOS-style window controls: traffic lights on the left.
+         Opt-in via #titlebar.titlebar-controls-mac (applyWindowControlStyle()
+         in main.js, seeded from the OS, overridable in Settings). Same
+         buttons and click handlers as the Windows cluster — decorations are
+         still off — just restyled and reordered. #titlebarThemeBtn is a
+         sibling of #titlebarControls (not inside it), so `order` can pull
+         the cluster left while the theme button stays on the right. ---- */
+      #titlebar.titlebar-controls-mac #titlebarControls {
+        order: -1;
+        align-items: center;
+        gap: 8px;
+        padding: 0 8px 0 13px;
+      }
+      #titlebar.titlebar-controls-mac #titlebarControls .titlebarButton {
+        width: 12px; height: 12px;
+        border-radius: 50%;
+        border: 0.5px solid rgba(0, 0, 0, 0.14);
+        color: rgba(0, 0, 0, 0.5); /* hover-glyph color */
+      }
+      #titlebar.titlebar-controls-mac #titlebarCloseBtn { background: #ff5f57; order: 1; }
+      #titlebar.titlebar-controls-mac #titlebarMinimizeBtn { background: #febc2e; order: 2; }
+      #titlebar.titlebar-controls-mac #titlebarMaximizeBtn { background: #28c840; order: 3; }
+      /* Neutralize the Windows close button's full-bleed red hover (incl. its
+         higher-specificity .titlebar-light variant). */
+      #titlebar.titlebar-controls-mac #titlebarCloseBtn:hover,
+      #titlebar.titlebar-light.titlebar-controls-mac #titlebarCloseBtn:hover {
+        background: #ff5f57; color: rgba(0, 0, 0, 0.5);
+      }
+      /* Glyphs stay hidden until the cluster is hovered (macOS behavior). */
+      #titlebar.titlebar-controls-mac #titlebarControls .titlebarButton svg {
+        width: 6.5px; height: 6.5px; stroke-width: 1.6;
+        opacity: 0; transition: opacity 0.08s ease;
+      }
+      #titlebar.titlebar-controls-mac #titlebarControls:hover .titlebarButton svg { opacity: 1; }
+      #titlebar.titlebar-controls-mac #titlebarMaximizeBtn .icon-maximize,
+      #titlebar.titlebar-controls-mac #titlebarMaximizeBtn .icon-restore { display: none; }
+      #titlebar.titlebar-controls-mac #titlebarMaximizeBtn .icon-mac-zoom { display: block; }
+      .titlebarButton .icon-mac-zoom { display: none; }
+      /* Inactive window: macOS greys all three lights; hovering the cluster
+         still re-colorizes them and shows the glyphs. Set from
+         getCurrentWindow().onFocusChanged() in main.js. */
+      #titlebar.titlebar-controls-mac.titlebar-unfocused #titlebarControls .titlebarButton {
+        background: rgba(255, 255, 255, 0.16);
+        border-color: transparent;
+      }
+      #titlebar.titlebar-light.titlebar-controls-mac.titlebar-unfocused #titlebarControls .titlebarButton {
+        background: rgba(0, 0, 0, 0.14);
+      }
+      #titlebar.titlebar-controls-mac.titlebar-unfocused #titlebarControls:hover #titlebarCloseBtn { background: #ff5f57; }
+      #titlebar.titlebar-controls-mac.titlebar-unfocused #titlebarControls:hover #titlebarMinimizeBtn { background: #febc2e; }
+      #titlebar.titlebar-controls-mac.titlebar-unfocused #titlebarControls:hover #titlebarMaximizeBtn { background: #28c840; }
+
       /* ---- Landing screen: shown until a file is open ---- */
       #landingScreen { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; box-sizing: border-box; padding: 24px; transition: background-color 0.15s ease; }
       #landingScreen.drag-active { background-color: var(--drag-active-bg); }
@@ -385,27 +437,30 @@
         </button>
         <div class="titlebarSeparator"></div>
       </div>
+      <!-- App control, not a window control — kept out of #titlebarControls
+           so the macOS-style layout can move that cluster to the far left
+           (CSS `order`) while this stays on the right. -->
+      <button id="titlebarThemeBtn" class="titlebarButton" type="button" data-theme="default">
+        <svg class="icon-theme-default" viewBox="0 0 10 10">
+          <circle cx="5" cy="5" r="4" />
+          <path d="M5 1 A4 4 0 0 1 5 9 Z" fill="currentColor" stroke="none" />
+        </svg>
+        <svg class="icon-theme-light" viewBox="0 0 10 10">
+          <circle cx="5" cy="5" r="2.3" />
+          <line x1="5" y1="0.4" x2="5" y2="1.6" />
+          <line x1="5" y1="8.4" x2="5" y2="9.6" />
+          <line x1="0.4" y1="5" x2="1.6" y2="5" />
+          <line x1="8.4" y1="5" x2="9.6" y2="5" />
+          <line x1="1.9" y1="1.9" x2="2.7" y2="2.7" />
+          <line x1="7.3" y1="7.3" x2="8.1" y2="8.1" />
+          <line x1="1.9" y1="8.1" x2="2.7" y2="7.3" />
+          <line x1="7.3" y1="2.7" x2="8.1" y2="1.9" />
+        </svg>
+        <svg class="icon-theme-dark" viewBox="0 0 10 10">
+          <path d="M7 1.2a4 4 0 1 0 1.8 7.6A4.6 4.6 0 0 1 7 1.2Z" />
+        </svg>
+      </button>
       <div id="titlebarControls">
-        <button id="titlebarThemeBtn" class="titlebarButton" type="button" data-theme="default">
-          <svg class="icon-theme-default" viewBox="0 0 10 10">
-            <circle cx="5" cy="5" r="4" />
-            <path d="M5 1 A4 4 0 0 1 5 9 Z" fill="currentColor" stroke="none" />
-          </svg>
-          <svg class="icon-theme-light" viewBox="0 0 10 10">
-            <circle cx="5" cy="5" r="2.3" />
-            <line x1="5" y1="0.4" x2="5" y2="1.6" />
-            <line x1="5" y1="8.4" x2="5" y2="9.6" />
-            <line x1="0.4" y1="5" x2="1.6" y2="5" />
-            <line x1="8.4" y1="5" x2="9.6" y2="5" />
-            <line x1="1.9" y1="1.9" x2="2.7" y2="2.7" />
-            <line x1="7.3" y1="7.3" x2="8.1" y2="8.1" />
-            <line x1="1.9" y1="8.1" x2="2.7" y2="7.3" />
-            <line x1="7.3" y1="2.7" x2="8.1" y2="1.9" />
-          </svg>
-          <svg class="icon-theme-dark" viewBox="0 0 10 10">
-            <path d="M7 1.2a4 4 0 1 0 1.8 7.6A4.6 4.6 0 0 1 7 1.2Z" />
-          </svg>
-        </button>
         <button id="titlebarMinimizeBtn" class="titlebarButton" type="button" aria-label="Minimize">
           <svg viewBox="0 0 10 10"><line x1="0" y1="5" x2="10" y2="5" /></svg>
         </button>
@@ -414,6 +469,12 @@
           <svg class="icon-restore" viewBox="0 0 10 10">
             <rect x="0.5" y="2.5" width="7" height="7" />
             <path d="M2.5 2.5V0.5H9.5V7.5H7.5" />
+          </svg>
+          <!-- Shown only in macOS-style mode (the outward-triangle zoom
+               glyph); the two above are hidden there. -->
+          <svg class="icon-mac-zoom" viewBox="0 0 10 10">
+            <path fill="currentColor" stroke="none" d="M2 2H6.4L2 6.4Z" />
+            <path fill="currentColor" stroke="none" d="M8 8H3.6L8 3.6Z" />
           </svg>
         </button>
         <button id="titlebarCloseBtn" class="titlebarButton" type="button" aria-label="Close">
@@ -501,6 +562,15 @@
             <option value="ask">Ask each time</option>
             <option value="copy">Always create a copy</option>
           </select>
+
+          <label for="windowControlsSelect">Window controls</label>
+          <select id="windowControlsSelect">
+            <option value="windows">Windows style — minimize / maximize / close, right side</option>
+            <option value="mac">macOS style — traffic lights, left side</option>
+          </select>
+          <p class="settings-help">
+            Defaults to your operating system's convention. Applies immediately.
+          </p>
 
           <div id="updateRow">
             <label>Updates</label>

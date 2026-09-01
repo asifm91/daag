@@ -53,6 +53,12 @@ const OPEN_MODE_KEY = "pdfAnnotator.openMode"; // "overwrite" | "ask" | "copy"
 const COPY_MAPPINGS_KEY = "pdfAnnotator.copyMappings";
 const THEME_KEY = "pdfAnnotator.theme"; // "default" | "light" | "dark"
 const THEME_CYCLE = ["default", "light", "dark"];
+// Window-control layout: Windows-style min/max/close cluster on the right,
+// or macOS-style traffic lights on the left. Seeded from the OS on first
+// run (see the seed near the "Custom titlebar" section), overridable in
+// Settings. Both are plain HTML buttons wired to the same window calls —
+// decorations stay off in tauri.conf.json regardless.
+const WINDOW_CONTROLS_KEY = "pdfAnnotator.windowControlStyle"; // "windows" | "mac"
 // AI comment summary (see the "AI comment summary settings" section and
 // summarizeComments() below). Endpoint/model fall back to a local Ollama
 // server so the feature works with nothing configured and nothing leaves
@@ -145,6 +151,7 @@ const settingsDialogSaveButtonEl = document.getElementById("settingsDialogSaveBu
 const settingsTabButtonEls = [...settingsDialogEl.querySelectorAll("#settingsTabs button")];
 const settingsTabPanelEls = [...settingsDialogEl.querySelectorAll(".settingsTabPanel")];
 const commenterNameInputEl = document.getElementById("commenterNameInput");
+const windowControlsSelectEl = document.getElementById("windowControlsSelect");
 const openModeSelectEl = document.getElementById("openModeSelect");
 const quickCommentsManageListEl = document.getElementById("quickCommentsManageList");
 const quickCommentAddInputEl = document.getElementById("quickCommentAddInput");
@@ -439,6 +446,44 @@ function setOpenMode(mode) {
   localStorage.setItem(OPEN_MODE_KEY, mode);
 }
 
+// ---- Window-control layout (Settings) ----------------------------------
+// No Tauri OS plugin in the tree (see the open_external/reqwest reasoning
+// in CLAUDE.md — we don't pull a plugin for one small thing), so the OS is
+// sniffed from the webview: WebView2 (Windows/Linux, Chromium) exposes
+// navigator.userAgentData.platform; WKWebView (macOS) doesn't, but
+// navigator.platform is "MacIntel" there. Only "mac" vs everything-else
+// matters.
+function detectPlatform() {
+  const raw =
+    navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || "";
+  return /mac|darwin/i.test(raw) ? "mac" : "windows";
+}
+
+function getWindowControlStyle() {
+  const stored = localStorage.getItem(WINDOW_CONTROLS_KEY);
+  return stored === "mac" || stored === "windows" ? stored : "windows";
+}
+
+function setWindowControlStyle(style) {
+  const normalized = style === "mac" ? "mac" : "windows";
+  localStorage.setItem(WINDOW_CONTROLS_KEY, normalized);
+  applyWindowControlStyle(normalized);
+}
+
+// Toggles the traffic-light layout on the titlebar. The buttons and their
+// click handlers are the same either way — this only restyles/reorders
+// them (see the #titlebar.titlebar-controls-mac block in index.html).
+function applyWindowControlStyle(style) {
+  titlebarEl.classList.toggle("titlebar-controls-mac", style === "mac");
+}
+
+// macOS greys its traffic lights while the window is inactive; mirror that
+// so the faux ones don't look permanently "focused". Harmless in
+// Windows-style mode (the class just goes unused).
+function applyWindowFocusState(focused) {
+  titlebarEl.classList.toggle("titlebar-unfocused", !focused);
+}
+
 // Landing-screen-only nudge: "overwrite" saves annotations straight into
 // the original file with no per-open confirmation, so it's worth flagging
 // before the user picks a file. Refreshed on init and whenever Settings is
@@ -506,6 +551,7 @@ function openSettingsDialog() {
   selectSettingsTab("settingsTabGeneral");
   commenterNameInputEl.value = getCommenterName();
   openModeSelectEl.value = getOpenMode();
+  windowControlsSelectEl.value = getWindowControlStyle();
   aiEndpointInputEl.value = getAiEndpoint();
   aiModelInputEl.value = getAiModel();
   aiApiKeyInputEl.value = getAiApiKey();
@@ -829,6 +875,7 @@ checkUpdateButtonEl.addEventListener("click", () => checkForUpdate({ silent: fal
 settingsDialogSaveButtonEl.addEventListener("click", () => {
   setCommenterName(commenterNameInputEl.value.trim());
   setOpenMode(openModeSelectEl.value);
+  setWindowControlStyle(windowControlsSelectEl.value);
   // Store raw (possibly blank) — the getters fall back to the defaults, so
   // clearing a field resets it rather than breaking the feature.
   localStorage.setItem(AI_ENDPOINT_KEY, aiEndpointInputEl.value.trim());
@@ -1118,6 +1165,22 @@ async function syncMaximizeButtonState() {
 }
 syncMaximizeButtonState();
 getCurrentWindow().onResized(syncMaximizeButtonState);
+
+// Seed the control layout from the OS on first run (macOS → traffic
+// lights), then apply whatever's stored. Settings can override later.
+if (!["windows", "mac"].includes(localStorage.getItem(WINDOW_CONTROLS_KEY))) {
+  localStorage.setItem(WINDOW_CONTROLS_KEY, detectPlatform());
+}
+applyWindowControlStyle(getWindowControlStyle());
+
+// Track window focus for the inactive-traffic-lights look (see
+// applyWindowFocusState). isFocused() throws outside a Tauri context
+// (plain vite dev) — assume focused there.
+getCurrentWindow()
+  .isFocused()
+  .then(applyWindowFocusState)
+  .catch(() => applyWindowFocusState(true));
+getCurrentWindow().onFocusChanged(({ payload: focused }) => applyWindowFocusState(focused));
 
 // ---- Titlebar theme button: default / light / dark ----------------------
 // "default" is the original look — dark chrome, light pdf.js viewer (pdf.js's

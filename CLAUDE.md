@@ -106,6 +106,34 @@ Windows titlebar at all. `#titlebar` in `index.html`
   the same icon. Tooth proportions matter more than they look: too
   little of each tooth rectangle overlapping the body circle reads as a
   spiky asterisk, not a gear.
+- **Window-control layout is switchable** (`#windowControlsSelect` in
+  Settings → General, key `pdfAnnotator.windowControlStyle`):
+  Windows-style min/max/close on the right (default), or macOS-style
+  traffic lights on the left. Seeded once from the OS on first run —
+  `detectPlatform()` sniffs the webview (`navigator.userAgentData.
+  platform`, falling back to `navigator.platform` since WKWebView lacks
+  the former) rather than pulling `@tauri-apps/plugin-os` for one string,
+  same "don't add a plugin for one thing" call as `open_external`. It's
+  purely a CSS reskin: `applyWindowControlStyle()` toggles
+  `#titlebar.titlebar-controls-mac`, and the *same* three buttons and
+  click handlers serve both looks — `decorations` stays `false`, there
+  are never real native controls. In the mac layout the three buttons
+  become 12px colored circles (glyphs revealed only on cluster hover,
+  matching macOS), reordered close/min/zoom via CSS `order`, and the
+  whole `#titlebarControls` is pulled to the far left with `order: -1`.
+  For that reorder to work `#titlebarThemeBtn` had to move *out* of
+  `#titlebarControls` to be a direct sibling (it's app chrome, not a
+  window control) so it can stay on the right while the cluster moves.
+  The maximize button carries a third SVG (`.icon-mac-zoom`, the
+  outward-triangle glyph) shown only in this mode; its normal
+  maximize/restore glyphs are hidden, and it does *not* swap on
+  maximize state (macOS shows the same zoom glyph either way).
+- **Inactive-window state** — `getCurrentWindow().onFocusChanged()`
+  toggles `#titlebar.titlebar-unfocused`; in the mac layout that greys
+  all three lights (a hover still re-colorizes them), mirroring macOS.
+  The class is harmless/unused in the Windows layout. `isFocused()` is
+  read once at startup for the initial state, `.catch()`-guarded for
+  plain `vite` dev where it throws.
 
 ### Theming
 One user-facing toggle (`#titlebarThemeBtn`, cycles default → light →
