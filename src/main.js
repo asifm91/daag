@@ -105,6 +105,10 @@ const LONG_PATH_RESTART_PENDING_KEY = "pdfAnnotator.longPathRestartPending";
 const LONG_PATH_DOC_URL =
   "https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation#enable-long-paths-in-windows-10-version-1607-and-later";
 const OLLAMA_DOC_URL = "https://ollama.com/download";
+// Project website (GitHub Pages) guide page + source repo, linked from the
+// Settings "About" tab.
+const GUIDE_URL = "https://asifm91.github.io/daag/guide.html";
+const REPO_URL = "https://github.com/asifm91/daag";
 // Auto-update. The updater plugin (see src-tauri) points at a GitHub
 // release's latest.json; the check runs once, quietly, a few seconds after
 // launch so it never competes with opening a document, and again on demand
@@ -182,6 +186,9 @@ const aiTestConnectionButtonEl = document.getElementById("aiTestConnectionButton
 const aiTestConnectionStatusEl = document.getElementById("aiTestConnectionStatus");
 const aiModelHistoryListEl = document.getElementById("aiModelHistoryList");
 const ollamaDocLinkEl = document.getElementById("ollamaDocLink");
+const aboutVersionLineEl = document.getElementById("aboutVersionLine");
+const aboutGuideLinkEl = document.getElementById("aboutGuideLink");
+const aboutRepoLinkEl = document.getElementById("aboutRepoLink");
 const summaryDialogEl = document.getElementById("summaryDialog");
 const summaryDialogCloseButtonEl = document.getElementById("summaryDialogCloseButton");
 const summaryModelInputEl = document.getElementById("summaryModelInput");
@@ -564,6 +571,7 @@ function openSettingsDialog() {
   renderQuickCommentsManageList();
   refreshLongPathStatus(); // fire-and-forget; fills in the status line async
   refreshUpdateRow(); // ditto — sets the Updates row (version / pending update)
+  refreshAboutRow(); // ditto — fills the About tab's version line
   settingsDialogEl.showModal();
   commenterNameInputEl.focus();
 }
@@ -637,6 +645,34 @@ ollamaDocLinkEl.addEventListener("click", (event) => {
   event.preventDefault();
   invoke("open_external", { url: OLLAMA_DOC_URL }).catch((err) => {
     console.error("Could not open the Ollama download page:", err);
+  });
+});
+
+// ---- Settings: "About" tab -------------------------------------------
+// Static info panel — the running version plus links out to the project
+// site's guide page and the source repo, opened via open_external (same
+// no-plugin approach as the doc links above).
+async function refreshAboutRow() {
+  let v = "";
+  try {
+    v = await getVersion();
+  } catch {
+    /* getVersion only fails outside a Tauri context (plain vite dev) */
+  }
+  aboutVersionLineEl.textContent = v ? `Version ${v}` : "Version —";
+}
+
+aboutGuideLinkEl.addEventListener("click", (event) => {
+  event.preventDefault();
+  invoke("open_external", { url: GUIDE_URL }).catch((err) => {
+    console.error("Could not open the guide page:", err);
+  });
+});
+
+aboutRepoLinkEl.addEventListener("click", (event) => {
+  event.preventDefault();
+  invoke("open_external", { url: REPO_URL }).catch((err) => {
+    console.error("Could not open the source repository:", err);
   });
 });
 

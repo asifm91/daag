@@ -9,6 +9,11 @@ stays in this file but is left off the website.
 
 ## [Unreleased]
 
+### Added
+
+- **About tab in Settings** — shows the running version and links out to the
+  online guide and the source repository.
+
 ## [1.4.0] — 2026-09-01
 
 ### Added

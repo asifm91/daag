@@ -549,6 +549,7 @@
           <button id="settingsTabGeneral" type="button" role="tab" aria-controls="settingsPanelGeneral" aria-selected="true">General</button>
           <button id="settingsTabAi" type="button" role="tab" aria-controls="settingsPanelAi" aria-selected="false">AI summary</button>
           <button id="settingsTabQuick" type="button" role="tab" aria-controls="settingsPanelQuick" aria-selected="false">Quick comments</button>
+          <button id="settingsTabAbout" type="button" role="tab" aria-controls="settingsPanelAbout" aria-selected="false">About</button>
         </div>
 
         <div id="settingsTabPanels">
@@ -652,6 +653,23 @@
             </div>
             <p id="quickCommentAddStatus" class="settings-status" hidden></p>
             <ul id="quickCommentsManageList"></ul>
+          </div>
+        </section>
+
+        <section id="settingsPanelAbout" class="settingsTabPanel" role="tabpanel" aria-labelledby="settingsTabAbout" hidden>
+          <div id="aboutRow">
+            <label>দাগ — Daag</label>
+            <p id="aboutVersionLine" class="settings-status">Version —</p>
+            <p class="settings-help">
+              A local-first desktop app for annotating PDFs. Highlights and
+              comments autosave straight into the file on disk every few
+              seconds, so an accidental reload can't lose your work.
+            </p>
+            <p class="settings-help">
+              <a id="aboutGuideLink" href="#">Open the guide</a>
+              &nbsp;·&nbsp;
+              <a id="aboutRepoLink" href="#">Source on GitHub</a>
+            </p>
           </div>
         </section>
         </div>
