@@ -147,6 +147,9 @@ const settingsTabPanelEls = [...settingsDialogEl.querySelectorAll(".settingsTabP
 const commenterNameInputEl = document.getElementById("commenterNameInput");
 const openModeSelectEl = document.getElementById("openModeSelect");
 const quickCommentsManageListEl = document.getElementById("quickCommentsManageList");
+const quickCommentAddInputEl = document.getElementById("quickCommentAddInput");
+const quickCommentAddButtonEl = document.getElementById("quickCommentAddButton");
+const quickCommentAddStatusEl = document.getElementById("quickCommentAddStatus");
 const longPathRowEl = document.getElementById("longPathRow");
 const longPathStatusEl = document.getElementById("longPathStatus");
 const enableLongPathButtonEl = document.getElementById("enableLongPathButton");
@@ -510,6 +513,8 @@ function openSettingsDialog() {
   aiSystemPromptInputEl.value = getAiSystemPrompt();
   clearAiTestStatus(); // a stale result from a previous open shouldn't linger
   renderAiModelDatalist();
+  quickCommentAddInputEl.value = "";
+  setQuickCommentAddStatus("");
   renderQuickCommentsManageList();
   refreshLongPathStatus(); // fire-and-forget; fills in the status line async
   refreshUpdateRow(); // ditto — sets the Updates row (version / pending update)
@@ -2906,6 +2911,21 @@ function recordQuickComment(rawText) {
   if (settingsDialogEl.open) renderQuickCommentsManageList();
 }
 
+// Add a phrase to the library without using it on a document (the Settings
+// "Add" control). Unlike recordQuickComment() this never bumps an existing
+// phrase's count — a duplicate is a no-op. Returns "added" | "duplicate" |
+// "empty" so the caller can give feedback.
+function addQuickCommentPhrase(rawText) {
+  const text = (rawText || "").trim();
+  if (!text) return "empty";
+  const list = getQuickComments();
+  const key = text.toLowerCase();
+  if (list.some((e) => e.text.toLowerCase() === key)) return "duplicate";
+  list.push({ text, count: 1, lastUsedAt: 0 });
+  saveQuickComments(list);
+  return "added";
+}
+
 // Fold a document's own repeated comments into the quick list — a comment
 // that appears two or more times in the same export/summary is, by
 // definition, a phrase the user reuses. One increment per distinct repeated
@@ -3315,6 +3335,41 @@ function renderQuickCommentsManageList() {
       return li;
     })
   );
+}
+
+function setQuickCommentAddStatus(text, state) {
+  if (!quickCommentAddStatusEl) return;
+  quickCommentAddStatusEl.hidden = !text;
+  quickCommentAddStatusEl.textContent = text || "";
+  if (state) quickCommentAddStatusEl.dataset.state = state;
+  else delete quickCommentAddStatusEl.dataset.state;
+}
+
+function submitQuickCommentAdd() {
+  const result = addQuickCommentPhrase(quickCommentAddInputEl.value);
+  if (result === "empty") return;
+  if (result === "duplicate") {
+    setQuickCommentAddStatus("That phrase is already in the list.", "warn");
+    quickCommentAddInputEl.select();
+    return;
+  }
+  quickCommentAddInputEl.value = "";
+  setQuickCommentAddStatus("Added.", "ok");
+  renderQuickCommentsManageList();
+  quickCommentAddInputEl.focus();
+}
+
+if (quickCommentAddButtonEl) {
+  quickCommentAddButtonEl.addEventListener("click", submitQuickCommentAdd);
+  quickCommentAddInputEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitQuickCommentAdd();
+    }
+  });
+  // Clear the "already in the list" / "Added." note as soon as the field
+  // changes again.
+  quickCommentAddInputEl.addEventListener("input", () => setQuickCommentAddStatus(""));
 }
 
 // ---- Exporting comments to Markdown --------------------------------------

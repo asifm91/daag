@@ -309,13 +309,16 @@ dialog**. All in `main.js`'s "Quick comments" section.
   shows the top `MAX_QUICK_COMMENT_MENU_ITEMS` (12) phrase texts only —
   `count` drives the sort but is never shown there (it does show, as `×N`,
   in the Settings list). **Never seeded.**
-  Entries appear two ways: typing one into the menu's own input, and
+  Entries appear three ways: typing one into the menu's own input, the
+  Settings tab's "Add a phrase" field (`#quickCommentAddInput` /
+  `addQuickCommentPhrase()` — a plain add that no-ops on a duplicate,
+  never bumps a count, unlike `recordQuickComment()`), and
   `harvestRepeatedComments()` — called from `exportComments()` and
   `runSummary()` — which folds in any comment that appears **≥ 2 times**
   within that one document (length is not a filter). `recordQuickComment()`
   does the case-insensitive-trimmed dedupe/increment. Settings has a
   management list (`#quickCommentsManageList`) with per-entry Remove; edits
-  there apply immediately, not on Save.
+  there (add and remove both) apply immediately, not on Save.
 - **The context-menu override** — a capture-phase `contextmenu` listener on
   `frame.contentDocument` (same technique as `blockInternalFileOpen` /
   `attachKeyboardShortcuts`), in `attachQuickCommentMenu()`, wired from

@@ -327,6 +327,12 @@
       }
       #quickCommentInput:focus { outline: 1px solid var(--border-strong); }
 
+      #quickCommentAddRow { display: flex; gap: 8px; margin-top: 10px; }
+      #quickCommentAddInput { flex: 1 1 auto; min-width: 0; box-sizing: border-box; background: var(--input-bg); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; padding: 7px 9px; font-size: 13px; }
+      #quickCommentAddButton { flex: 0 0 auto; padding: 6px 14px; font-size: 12px; background: var(--surface); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; cursor: pointer; }
+      #quickCommentAddButton:hover:not(:disabled) { background: var(--surface-hover); }
+      #quickCommentAddButton:disabled { opacity: 0.6; cursor: default; }
+      #quickCommentAddStatus { margin-top: 6px; }
       #quickCommentsManageList { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; }
       #quickCommentsManageList li { display: flex; align-items: center; gap: 8px; font-size: 12px; }
       #quickCommentsManageList .qcManageText { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -568,8 +574,13 @@
               Phrases offered when you right-click a page or press <code>Q</code>
               in the viewer, most-used first. They're added as you use them, and
               when exporting or summarizing surfaces a comment that repeats within
-              a document. Nothing is pre-filled.
+              a document. Nothing is pre-filled — add your own below.
             </p>
+            <div id="quickCommentAddRow">
+              <input id="quickCommentAddInput" type="text" autocomplete="off" spellcheck="false" placeholder="Add a phrase…" />
+              <button id="quickCommentAddButton" type="button">Add</button>
+            </div>
+            <p id="quickCommentAddStatus" class="settings-status" hidden></p>
             <ul id="quickCommentsManageList"></ul>
           </div>
         </section>
