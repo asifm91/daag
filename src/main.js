@@ -572,6 +572,14 @@ function setUpdateStatus(text, state) {
   else delete updateStatusEl.dataset.state;
 }
 
+// Notification dot on the titlebar Settings gear — on whenever a check
+// (silent startup pass or the manual Settings button) has found an
+// update that hasn't been installed yet. Installing relaunches the app,
+// so there's no explicit "clear" beyond a later check finding nothing.
+function reflectPendingUpdateBadge() {
+  titlebarSettingsBtn.classList.toggle("has-update", Boolean(pendingUpdate));
+}
+
 // Reflect current state into the Settings "Updates" row every time the
 // dialog opens — the pending-update banner if a check already found one,
 // otherwise just the running version.
@@ -602,11 +610,13 @@ async function checkForUpdate({ silent }) {
     const update = await checkTauriUpdate();
     if (update) {
       pendingUpdate = update;
+      reflectPendingUpdateBadge();
       if (!silent) setUpdateStatus(`Update available — v${update.version}`, "ok");
       setStatus(`Update available — দাগ v${update.version}`, "", { toast: silent });
       openUpdateDialog(update);
     } else {
       pendingUpdate = null;
+      reflectPendingUpdateBadge();
       if (silent) {
         setStatus("দাগ is up to date", "");
       } else {

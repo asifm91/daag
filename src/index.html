@@ -82,6 +82,17 @@
       #titlebarStatusBtn.status-saving { --status-color: #6ca0e0; }
       #titlebarStatusBtn.status-error { --status-color: #e06c6c; }
       #titlebarStatusBtn.status-saved { --status-color: #6ce0a0; }
+      /* Notification dot on the Settings gear when an update is available —
+         toggled by reflectPendingUpdateBadge() in main.js from both the
+         startup (silent) and manual "Check for updates…" paths. The ring
+         matches the titlebar background so the dot reads as a badge. */
+      #titlebarSettingsBtn { position: relative; }
+      #titlebarSettingsBtn.has-update::after {
+        content: ""; position: absolute; top: 5px; right: 4px;
+        width: 7px; height: 7px; border-radius: 50%;
+        background: #6ca0e0; box-shadow: 0 0 0 1.5px #1f1f1f;
+      }
+      #titlebar.titlebar-light #titlebarSettingsBtn.has-update::after { box-shadow: 0 0 0 1.5px #f9f9fa; }
       .titlebarButton .icon-restore,
       .titlebarButton .icon-theme-light,
       .titlebarButton .icon-theme-dark { display: none; }
