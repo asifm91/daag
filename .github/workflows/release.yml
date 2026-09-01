@@ -25,9 +25,9 @@ jobs:
           - platform: macos-latest
             args: "--target universal-apple-darwin"
             rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
-          # Linux: AppImage only (Ubuntu 22.04 is the safe webkit baseline)
+          # Linux: AppImage + .deb (Ubuntu 22.04 is the safe webkit baseline)
           - platform: ubuntu-22.04
-            args: "--bundles appimage"
+            args: "--bundles appimage,deb"
             rust-targets: ""
           # Windows: NSIS installer (the raw portable .exe is uploaded
           # separately in the last step)
@@ -83,7 +83,7 @@ jobs:
             Download the file for your platform below.
 
             - **Windows** — `*_x64-setup.exe` (installer) or `Daag-portable-x64.exe` (no install needed)
-            - **Linux** — `*_amd64.AppImage`
+            - **Linux** — `*_amd64.AppImage` or `*_amd64.deb`
             - **macOS** — `*_universal.dmg`
 
             **macOS first launch:** the app is unsigned, so Gatekeeper will block it. Right-click the app → Open (macOS 14 and earlier), or open it once then go to System Settings → Privacy & Security → "Open Anyway" (macOS 15+). Or from a terminal: `xattr -dr com.apple.quarantine /Applications/Daag.app`
