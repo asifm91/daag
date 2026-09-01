@@ -27,6 +27,13 @@
 //     by the "why administrator access is needed" link next to the
 //     long-path toggle). Avoids pulling in tauri-plugin-opener for one
 //     link.
+//   - summarize_comments / cancel_summarize: POST the document's comments
+//     to a user-configured OpenAI-compatible /chat/completions endpoint
+//     and return the model's summary; cancel_summarize aborts an
+//     in-flight request (dropping the connection so a local model stops
+//     generating). Done here rather than with fetch() in the webview so it
+//     sidesteps CORS entirely and any API key never enters the renderer.
+//     Cross-platform (no #[cfg]).
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -151,16 +158,209 @@ fn open_external(_url: String) -> Result<(), String> {
     Err("Opening external links is only supported on Windows.".into())
 }
 
+// ---- AI comment summary -------------------------------------------------
+// Sends the document's comments to any OpenAI-compatible
+// `/chat/completions` endpoint (local Ollama by default — see the AI
+// settings section in src/main.js) and hands the summary back. The
+// front-end builds both prompt strings; this just does the HTTP so the
+// webview never makes the cross-origin call and never holds the API key.
+
+#[derive(serde::Deserialize)]
+struct ChatMessageOut {
+    content: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ChatChoiceOut {
+    message: ChatMessageOut,
+}
+
+#[derive(serde::Deserialize)]
+struct ChatResponseOut {
+    choices: Vec<ChatChoiceOut>,
+}
+
+fn truncate_message(s: &str, max: usize) -> String {
+    let s = s.trim();
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", s.chars().take(max).collect::<String>())
+    }
+}
+
+/// Turn an error response body into a short, human-readable line. Handles
+/// the OpenAI shape (`{"error": {"message": ...}}`), the Ollama shape
+/// (`{"error": "model ... not found"}`), and a couple of other common
+/// `{"message"|"detail": ...}` shapes; otherwise falls back to a terse
+/// status-based sentence rather than dumping the raw JSON at the user.
+fn concise_http_error(status: reqwest::StatusCode, body: &str) -> String {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body) {
+        let msg = v
+            .get("error")
+            .and_then(|e| {
+                e.as_str()
+                    .map(str::to_string)
+                    .or_else(|| e.get("message").and_then(|m| m.as_str()).map(str::to_string))
+            })
+            .or_else(|| v.get("message").and_then(|m| m.as_str()).map(str::to_string))
+            .or_else(|| v.get("detail").and_then(|m| m.as_str()).map(str::to_string));
+        if let Some(m) = msg {
+            if !m.trim().is_empty() {
+                return truncate_message(&m, 300);
+            }
+        }
+    }
+    match status.as_u16() {
+        400 => "The AI endpoint rejected the request (400). Check the model name.".to_string(),
+        401 | 403 => "The AI endpoint rejected the API key.".to_string(),
+        404 => "The AI endpoint or model was not found. Check the endpoint URL and model name.".to_string(),
+        429 => "The AI endpoint is rate-limiting requests. Try again shortly.".to_string(),
+        500..=599 => format!("The AI endpoint reported a server error ({}).", status.as_u16()),
+        other => format!("The AI endpoint returned HTTP {other}."),
+    }
+}
+
+// Holds the currently-running summary task so cancel_summarize can abort
+// it. Single-flight is enforced on the JS side; the generation id only
+// keeps summarize_comments from clearing a slot a newer request claimed.
+#[derive(Default)]
+struct SummaryTask {
+    current: std::sync::Mutex<Option<(u64, tauri::async_runtime::JoinHandle<()>)>>,
+    next_id: std::sync::atomic::AtomicU64,
+}
+
+#[tauri::command]
+async fn summarize_comments(
+    task: tauri::State<'_, SummaryTask>,
+    base_url: String,
+    api_key: Option<String>,
+    model: String,
+    system_prompt: String,
+    user_prompt: String,
+) -> Result<String, String> {
+    let id = task
+        .next_id
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+    // Run the request on its own task so an abort() actually drops the
+    // in-flight reqwest future (closing the connection, which stops a
+    // local model mid-generation) instead of just detaching from it.
+    let (tx, mut rx) = tauri::async_runtime::channel::<Result<String, String>>(1);
+    let handle = tauri::async_runtime::spawn(async move {
+        let result =
+            run_chat_request(base_url, api_key, model, system_prompt, user_prompt).await;
+        let _ = tx.send(result).await;
+    });
+
+    if let Some((_, stale)) = task.current.lock().unwrap().replace((id, handle)) {
+        stale.abort();
+    }
+
+    let outcome = match rx.recv().await {
+        Some(result) => result,
+        // Sender dropped without sending -> the task was aborted.
+        None => Err("Summary cancelled.".to_string()),
+    };
+
+    let mut guard = task.current.lock().unwrap();
+    if guard.as_ref().map(|(cur, _)| *cur == id).unwrap_or(false) {
+        *guard = None;
+    }
+
+    outcome
+}
+
+#[tauri::command]
+fn cancel_summarize(task: tauri::State<'_, SummaryTask>) {
+    if let Some((_, handle)) = task.current.lock().unwrap().take() {
+        handle.abort();
+    }
+}
+
+async fn run_chat_request(
+    base_url: String,
+    api_key: Option<String>,
+    model: String,
+    system_prompt: String,
+    user_prompt: String,
+) -> Result<String, String> {
+    let base = base_url.trim().trim_end_matches('/');
+    if base.is_empty() {
+        return Err("No AI endpoint is configured. Set one in Settings.".into());
+    }
+    let url = format!("{base}/chat/completions");
+
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [
+            { "role": "system", "content": system_prompt },
+            { "role": "user", "content": user_prompt },
+        ],
+        "stream": false,
+        "temperature": 0.2,
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .build()
+        .map_err(|e| format!("Could not create the HTTP client: {e}"))?;
+
+    let mut req = client.post(&url).json(&body);
+    if let Some(key) = api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+    {
+        req = req.bearer_auth(key);
+    }
+
+    let resp = req.send().await.map_err(|e| {
+        if e.is_timeout() {
+            format!("The AI endpoint at {base} timed out. The model may be too slow, or not running.")
+        } else if e.is_connect() {
+            format!("Could not connect to the AI endpoint at {base}. Is the server running?")
+        } else {
+            format!("Could not reach the AI endpoint at {base}.")
+        }
+    })?;
+
+    let status = resp.status();
+    let text = resp
+        .text()
+        .await
+        .map_err(|_| "Could not read the response from the AI endpoint.".to_string())?;
+
+    if !status.is_success() {
+        return Err(concise_http_error(status, &text));
+    }
+
+    let parsed: ChatResponseOut = serde_json::from_str(&text)
+        .map_err(|_| "The AI endpoint returned an unexpected response format.".to_string())?;
+
+    parsed
+        .choices
+        .into_iter()
+        .next()
+        .and_then(|c| c.message.content)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "The AI endpoint returned an empty summary.".into())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .manage(SummaryTask::default())
         .invoke_handler(tauri::generate_handler![
             get_os_username,
             get_launch_path,
             long_paths_enabled,
             enable_long_paths,
-            open_external
+            open_external,
+            summarize_comments,
+            cancel_summarize
         ])
         .run(tauri::generate_context!())
         .expect("error while running Daag");

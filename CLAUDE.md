@@ -142,15 +142,117 @@ document's editing session, not general app chrome:
   counterpart to hide, it's purely additive.
 - **Export Comments** (`injectExportCommentsButton`) — exports the
   file's comments; purely additive, no pdf.js counterpart.
+- **Summarize Comments** (`injectSummarizeCommentsButton`) — sends the
+  file's comments to a configurable OpenAI-compatible endpoint and shows
+  the reply in `#summaryDialog`; see AI comment summary below. Purely
+  additive.
 
 Injector call order in `initializeViewer()` determines left-to-right
 placement among what's injected; final toolbar layout is [editor tools]
-| Undo All, Export Comments, Print (pdf.js's own, untouched) | Save.
+| Undo All, Export Comments, Summarize Comments, Print (pdf.js's own,
+untouched) | Save.
 
-All three share one externally-loaded stylesheet
+All four share one externally-loaded stylesheet
 (`ensureCustomStylesheetLoaded` → `public/custom-viewer.css`) — **must**
 be a real `<link>`, not a JS-inserted `<style>` tag; see Known rough
 edges for why.
+
+### AI comment summary
+The toolbar's Summarize Comments button (`onSummarizeButtonClick`) reuses
+`exportComments()`'s exact collection path (`collectCommentedAnnotations`),
+flattens the entries into a prompt (`renderCommentsForPrompt`), and calls
+the **`summarize_comments` Tauri command** (Rust side), which POSTs an
+OpenAI-compatible `/chat/completions` request and returns
+`choices[0].message.content`. The reply shows in `#summaryDialog` — a
+plain `white-space:pre-wrap` box, no Markdown renderer in the app.
+- **The dialog opens immediately, before the request.** Generation
+  latency is unbounded (a slow local model can take minutes), so
+  `onSummarizeButtonClick` shows the dialog first, then `runSummary()`
+  fills the body: a CSS spinner (`.summarySpinner`, body class
+  `is-loading`) while the request is in flight, the result on success, or
+  the error text (body class `is-error`) on failure. Never disable the
+  toolbar button for the duration — the modal dialog already blocks a
+  second trigger, and `summaryInFlight` guards `runSummary()`.
+- **Single-flight, with a real Stop.** Only one summary runs at a time
+  (`summaryInFlight`). The Regenerate button swaps to **Stop** while a
+  request is in flight; Stop calls the **`cancel_summarize`** command,
+  which `abort()`s the spawned Rust task so the in-flight `reqwest` future
+  is *dropped* — the HTTP connection closes and a local model stops
+  generating, freeing the endpoint for an immediate re-run with a
+  different model. `summarize_comments` runs the request on its own
+  `async_runtime::spawn` task and awaits the result over a channel
+  precisely so this abort works (a plain `.await` in the command couldn't
+  be cancelled). `summaryRunId` is bumped on Stop so a result that lands
+  anyway (abort lost the race) is discarded by `runSummary()` instead of
+  clobbering the UI. Stop is `disabled` for `STOP_BUTTON_ARM_MS` after a
+  run starts, so a double-click on Regenerate (now sitting where Stop
+  appeared) can't instantly kill the run it just began.
+- **Stop keeps the last good result on screen.** `renderSummaryStopped()`
+  re-renders `summaryCache.markdown` (when it's for the current document)
+  with a muted `#summaryDialogNotice` line — "showing the last completed
+  summary" — instead of blanking the pane; only with no cache does it show
+  the plain "Stopped, press Regenerate" prompt. The notice is cleared by
+  every other render path; the status toast stays a plain "Summary
+  stopped" either way.
+- **Closing the dialog does *not* abort.** A run in progress finishes in
+  the background and `renderSummaryResult` still caches it; reopening the
+  dialog while it's running (`onSummarizeButtonClick` sees
+  `summaryInFlight`) just re-shows the spinner.
+- **Result is cached per document** (`summaryCache =
+  { path, promptKey, model, systemPrompt, markdown }`). A second button
+  press with a matching `path` + `model` + `systemPrompt` renders the
+  cached markdown with no network call, then re-collects the comments in
+  the background and silently regenerates only if `promptKey` (the full
+  user-prompt string, which
+  encodes every comment/context/author/page) no longer matches. Cleared
+  on document change (`loadPdfIntoViewer`) and bypassed by the dialog's
+  **Regenerate** button, which always does a fresh run.
+- **The dialog has its own Model field** (`#summaryModelInput`), seeded
+  from `getAiModel()` on open. It's the source of truth while the dialog
+  is open; `runSummary()` writes it back to `AI_MODEL_KEY` so Settings
+  and the dialog stay in step. (Endpoint, API key, and system prompt are
+  Settings-only.)
+- **Model fields are comboboxes.** Both `#summaryModelInput` and Settings'
+  `#aiModelInput` point a shared `<datalist id="aiModelHistoryList">` at
+  `AI_MODEL_HISTORY_KEY` (most-recent-first, capped at
+  `MAX_AI_MODEL_HISTORY`), so switching models is a pick, not a retype.
+  `addAiModelToHistory()` runs on a successful summary and on Settings
+  save; `renderAiModelDatalist()` always also offers `AI_MODEL_DEFAULT`.
+- **The system prompt lives in `src/summary-system-prompt.txt`**, imported
+  into `main.js` as `DEFAULT_SUMMARY_SYSTEM_PROMPT` (`?raw`, inlined at
+  build). Settings has a `#aiSystemPromptInput` textarea (+ **Restore
+  default** button) whose value persists to `AI_SYSTEM_PROMPT_KEY`;
+  `getAiSystemPrompt()` returns it, or the bundled default when blank. The
+  Settings save handler stores nothing when the field is blank *or* equals
+  the current default, so a later edit to the `.txt` still reaches users
+  who never customized it. `summaryCache.systemPrompt` invalidates a
+  cached summary when the prompt changes.
+- **Fenced-reply guard.** Some models (Mistral) wrap the whole reply in
+  ```` ```markdown … ``` ```` despite the system prompt telling them not
+  to. `stripOuterCodeFence()` unwraps a response that is *entirely* one
+  fenced block; one that merely contains a fenced block partway through
+  is left alone.
+- **Errors are made concise Rust-side.** `concise_http_error()` pulls a
+  human line out of the OpenAI (`{"error":{"message"}}`) / Ollama
+  (`{"error":"…"}`) / `{"message"|"detail"}` error shapes, truncates to
+  300 chars, and otherwise falls back to a terse status sentence — the
+  raw JSON body never reaches the toast. `send()` failures are mapped to
+  connect / timeout / unreachable messages naming the endpoint.
+- **The HTTP call is Rust-side on purpose** — the webview never touches
+  the endpoint, so there's no CORS to satisfy and the API key never
+  enters the renderer. Same reasoning as `open_external` preferring
+  `rundll32` over a plugin: one small `reqwest` command beats wiring up
+  `@tauri-apps/plugin-http`'s capability/scope system. `reqwest` uses
+  `rustls-tls` (no system OpenSSL needed for a Windows build).
+- **Config lives in Settings** (`#aiSummaryRow`): endpoint, model,
+  optional API key — three `localStorage` keys
+  (`AI_ENDPOINT_KEY`/`AI_MODEL_KEY`/`AI_API_KEY_KEY`). Endpoint/model
+  getters fall back to `AI_ENDPOINT_DEFAULT`
+  (`http://localhost:11434/v1`) / `AI_MODEL_DEFAULT` (`llama3.2`) when
+  blank, so it works against a local Ollama with zero setup and nothing
+  leaves the machine unless the user repoints it. Any OpenAI-compatible
+  provider (LM Studio, OpenRouter, OpenAI) works by changing those
+  fields.
 
 ### Status/feedback: three channels, not a status bar
 There used to be a simple status bar; it's gone. `setStatus(text, kind,
@@ -281,8 +383,13 @@ glue commands, none with real logic: `get_os_username` /
 `get_launch_path` (see below), and — all Windows-only, `#[cfg(windows)]`
 with no-op `#[cfg(not(windows))]` stubs so `generate_handler!` stays
 valid off-Windows — `long_paths_enabled` / `enable_long_paths` /
-`open_external` (see "Windows long paths" below). All real logic is in
-the frontend.
+`open_external` (see "Windows long paths" below) — plus two
+cross-platform commands, `summarize_comments` / `cancel_summarize` (the
+only ones that pull a non-trivial dependency, `reqwest`): a bare
+OpenAI-compatible `/chat/completions` POST for the AI comment summary
+feature, plus an abort path for it, backed by a small `SummaryTask`
+managed-state slot holding the in-flight task handle (see "AI comment
+summary" above). All real logic is in the frontend.
 
 ### Windows long paths (> MAX_PATH)
 Dragging a PDF whose absolute path exceeds ~259 chars onto the window is

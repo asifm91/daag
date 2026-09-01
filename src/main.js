@@ -4,6 +4,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { invoke } from "@tauri-apps/api/core";
 import { dirname, basename, join } from "@tauri-apps/api/path";
+// Default AI summary system prompt — kept in its own plain-text file rather
+// than inline so it's easy to read and tweak. `?raw` inlines it at build.
+import DEFAULT_SUMMARY_SYSTEM_PROMPT from "./summary-system-prompt.txt?raw";
 
 // ---- State -----------------------------------------------------------
 let currentPath = null; // absolute path of the PDF currently open
@@ -28,6 +31,10 @@ let folderPdfIndex = -1; // index of currentPath's file within folderPdfList
 
 const AUTOSAVE_DEBOUNCE_MS = 4000; // save 4s after the last edit
 const AUTOSAVE_MAX_WAIT_MS = 20000; // ...but never wait longer than this
+// The summary dialog's Stop button ignores clicks for this long after a
+// run starts, so a double-click on Regenerate can't immediately kill the
+// request it just began (Regenerate → Stop swap in place).
+const STOP_BUTTON_ARM_MS = 800;
 const RECENT_FILES_KEY = "pdfAnnotator.recentFiles";
 const MAX_RECENT_FILES = 8;
 const MAX_LOG_ENTRIES = 200;
@@ -36,6 +43,22 @@ const OPEN_MODE_KEY = "pdfAnnotator.openMode"; // "overwrite" | "ask" | "copy"
 const COPY_MAPPINGS_KEY = "pdfAnnotator.copyMappings";
 const THEME_KEY = "pdfAnnotator.theme"; // "default" | "light" | "dark"
 const THEME_CYCLE = ["default", "light", "dark"];
+// AI comment summary (see the "AI comment summary settings" section and
+// summarizeComments() below). Endpoint/model fall back to a local Ollama
+// server so the feature works with nothing configured and nothing leaves
+// the machine by default.
+const AI_ENDPOINT_KEY = "pdfAnnotator.aiEndpoint";
+const AI_MODEL_KEY = "pdfAnnotator.aiModel";
+const AI_API_KEY_KEY = "pdfAnnotator.aiApiKey";
+// User override for the summary system prompt (Settings). Blank / unset =
+// use the bundled default from summary-system-prompt.txt.
+const AI_SYSTEM_PROMPT_KEY = "pdfAnnotator.aiSystemPrompt";
+// Recently-used model names, most-recent-first, surfaced as a datalist so
+// switching models doesn't mean retyping the whole name.
+const AI_MODEL_HISTORY_KEY = "pdfAnnotator.aiModelHistory";
+const MAX_AI_MODEL_HISTORY = 10;
+const AI_ENDPOINT_DEFAULT = "http://localhost:11434/v1";
+const AI_MODEL_DEFAULT = "llama3.2";
 // Set right after the user enables Windows long path support from Settings;
 // cleared on the next app start (a fresh process picks the setting up), so
 // the Settings status can say "restart to apply" only while that's true.
@@ -45,6 +68,7 @@ const LONG_PATH_RESTART_PENDING_KEY = "pdfAnnotator.longPathRestartPending";
 // value, which is why turning it on needs administrator approval.
 const LONG_PATH_DOC_URL =
   "https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation#enable-long-paths-in-windows-10-version-1607-and-later";
+const OLLAMA_DOC_URL = "https://ollama.com/download";
 
 // "default" keeps the original look (dark chrome, light pdf.js viewer —
 // matches pdf.js's own default toolbar color); "light"/"dark" force both
@@ -89,6 +113,22 @@ const longPathRowEl = document.getElementById("longPathRow");
 const longPathStatusEl = document.getElementById("longPathStatus");
 const enableLongPathButtonEl = document.getElementById("enableLongPathButton");
 const longPathDocLinkEl = document.getElementById("longPathDocLink");
+const aiEndpointInputEl = document.getElementById("aiEndpointInput");
+const aiModelInputEl = document.getElementById("aiModelInput");
+const aiApiKeyInputEl = document.getElementById("aiApiKeyInput");
+const aiSystemPromptInputEl = document.getElementById("aiSystemPromptInput");
+const aiSystemPromptRestoreButtonEl = document.getElementById("aiSystemPromptRestoreButton");
+const aiModelHistoryListEl = document.getElementById("aiModelHistoryList");
+const ollamaDocLinkEl = document.getElementById("ollamaDocLink");
+const summaryDialogEl = document.getElementById("summaryDialog");
+const summaryDialogCloseButtonEl = document.getElementById("summaryDialogCloseButton");
+const summaryModelInputEl = document.getElementById("summaryModelInput");
+const summaryDialogBodyEl = document.getElementById("summaryDialogBody");
+const summaryDialogNoticeEl = document.getElementById("summaryDialogNotice");
+const summaryDialogRegenerateButtonEl = document.getElementById("summaryDialogRegenerateButton");
+const summaryDialogStopButtonEl = document.getElementById("summaryDialogStopButton");
+const summaryDialogCopyButtonEl = document.getElementById("summaryDialogCopyButton");
+const summaryDialogSaveButtonEl = document.getElementById("summaryDialogSaveButton");
 const undoAllDialogEl = document.getElementById("undoAllDialog");
 const undoAllDialogCloseButtonEl = document.getElementById("undoAllDialogCloseButton");
 const undoAllDialogCancelButtonEl = document.getElementById("undoAllDialogCancelButton");
@@ -201,6 +241,73 @@ async function seedDefaultCommenterName() {
   }
 }
 
+// ---- AI comment summary settings --------------------------------------
+// The "Summarize Comments" toolbar button sends the document's comments to
+// an OpenAI-compatible /chat/completions endpoint and shows the reply (see
+// summarizeComments() below). Endpoint/model default to a local Ollama
+// server, so it works out of the box and nothing leaves the machine unless
+// the user points it elsewhere. The HTTP call is made Rust-side
+// (summarize_comments in src/main.rs) — that sidesteps CORS and keeps the
+// API key out of the webview. Same localStorage-backed shape as the
+// commenter-name setting above; a blank stored value falls back to the
+// default rather than disabling the feature.
+function getAiEndpoint() {
+  return (localStorage.getItem(AI_ENDPOINT_KEY) || AI_ENDPOINT_DEFAULT).trim();
+}
+
+function getAiModel() {
+  return (localStorage.getItem(AI_MODEL_KEY) || AI_MODEL_DEFAULT).trim();
+}
+
+function getAiApiKey() {
+  return (localStorage.getItem(AI_API_KEY_KEY) || "").trim();
+}
+
+// Settings holds an optional override; a blank/unset value means "use the
+// bundled default" (so a later edit to summary-system-prompt.txt still
+// reaches users who never customised it).
+function getAiSystemPrompt() {
+  const stored = localStorage.getItem(AI_SYSTEM_PROMPT_KEY);
+  return stored && stored.trim() ? stored : DEFAULT_SUMMARY_SYSTEM_PROMPT.trim();
+}
+
+// ---- Recently-used AI model names ------------------------------------
+// Both model inputs (Settings and the summary dialog) point a <datalist>
+// at this list so the user can pick a previously-used model instead of
+// retyping it. Most-recent-first, delimited to MAX_AI_MODEL_HISTORY.
+function getAiModelHistory() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(AI_MODEL_HISTORY_KEY));
+    return Array.isArray(parsed) ? parsed.filter((m) => typeof m === "string" && m.trim()) : [];
+  } catch {
+    return [];
+  }
+}
+
+function addAiModelToHistory(model) {
+  const name = (model || "").trim();
+  if (!name) return;
+  const next = [name, ...getAiModelHistory().filter((m) => m !== name)].slice(
+    0,
+    MAX_AI_MODEL_HISTORY
+  );
+  localStorage.setItem(AI_MODEL_HISTORY_KEY, JSON.stringify(next));
+  renderAiModelDatalist();
+}
+
+function renderAiModelDatalist() {
+  if (!aiModelHistoryListEl) return;
+  // Always offer the built-in default even before anything's been used.
+  const names = [...new Set([...getAiModelHistory(), AI_MODEL_DEFAULT])];
+  aiModelHistoryListEl.replaceChildren(
+    ...names.map((name) => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      return opt;
+    })
+  );
+}
+
 // ---- Global "open mode" setting + per-file copy-destination memory -------
 // Governs what happens when a PDF is opened: overwrite it in place (today's
 // only behavior, and still the default here), always ask, or always create
@@ -267,6 +374,11 @@ function isKnownCopyPath(path) {
 function openSettingsDialog() {
   commenterNameInputEl.value = getCommenterName();
   openModeSelectEl.value = getOpenMode();
+  aiEndpointInputEl.value = getAiEndpoint();
+  aiModelInputEl.value = getAiModel();
+  aiApiKeyInputEl.value = getAiApiKey();
+  aiSystemPromptInputEl.value = getAiSystemPrompt();
+  renderAiModelDatalist();
   refreshLongPathStatus(); // fire-and-forget; fills in the status line async
   settingsDialogEl.showModal();
   commenterNameInputEl.focus();
@@ -337,11 +449,38 @@ longPathDocLinkEl.addEventListener("click", (event) => {
   });
 });
 
+ollamaDocLinkEl.addEventListener("click", (event) => {
+  event.preventDefault();
+  invoke("open_external", { url: OLLAMA_DOC_URL }).catch((err) => {
+    console.error("Could not open the Ollama download page:", err);
+  });
+});
+
 settingsDialogSaveButtonEl.addEventListener("click", () => {
   setCommenterName(commenterNameInputEl.value.trim());
   setOpenMode(openModeSelectEl.value);
+  // Store raw (possibly blank) — the getters fall back to the defaults, so
+  // clearing a field resets it rather than breaking the feature.
+  localStorage.setItem(AI_ENDPOINT_KEY, aiEndpointInputEl.value.trim());
+  const modelValue = aiModelInputEl.value.trim();
+  localStorage.setItem(AI_MODEL_KEY, modelValue);
+  addAiModelToHistory(modelValue);
+  localStorage.setItem(AI_API_KEY_KEY, aiApiKeyInputEl.value.trim());
+  // Blank, or unchanged from the bundled default → store nothing, so a
+  // future default edit still flows through.
+  const promptValue = aiSystemPromptInputEl.value.trim();
+  if (!promptValue || promptValue === DEFAULT_SUMMARY_SYSTEM_PROMPT.trim()) {
+    localStorage.removeItem(AI_SYSTEM_PROMPT_KEY);
+  } else {
+    localStorage.setItem(AI_SYSTEM_PROMPT_KEY, promptValue);
+  }
   updateLandingOpenModeWarning();
   settingsDialogEl.close();
+});
+
+aiSystemPromptRestoreButtonEl.addEventListener("click", () => {
+  aiSystemPromptInputEl.value = DEFAULT_SUMMARY_SYSTEM_PROMPT.trim();
+  aiSystemPromptInputEl.focus();
 });
 settingsDialogCancelButtonEl.addEventListener("click", () => settingsDialogEl.close());
 settingsDialogCloseButtonEl.addEventListener("click", () => settingsDialogEl.close());
@@ -978,6 +1117,47 @@ function injectExportCommentsButton() {
   toolbarExportCommentsButton = button;
 }
 
+// ---- Adding a "Summarize Comments" button to pdf.js's toolbar -----------
+// Same comment-collection path as Export Comments, but instead of writing
+// the comments to Markdown it sends them to a configurable
+// OpenAI-compatible endpoint and shows the model's summary in a dialog —
+// see summarizeComments() below. Disabled until a file is open. Injected
+// the same way and for the same reasons as the other toolbar buttons.
+let toolbarSummarizeCommentsButton = null;
+function injectSummarizeCommentsButton() {
+  if (toolbarSummarizeCommentsButton) return;
+  const doc = frame.contentDocument;
+  const downloadButton = doc.getElementById("downloadButton");
+  const group = downloadButton && downloadButton.closest(".toolbarHorizontalGroup");
+  if (!group) return;
+
+  ensureCustomStylesheetLoaded(doc);
+
+  const button = doc.createElement("button");
+  button.id = "customSummarizeCommentsButton";
+  button.className = "toolbarButton";
+  button.type = "button";
+  button.title = "Summarize all comments with AI";
+  button.disabled = true;
+  button.addEventListener("click", () =>
+    onSummarizeButtonClick().catch((err) => {
+      console.error(err);
+      setStatus("Summarize comments failed", "error", { toast: true });
+    })
+  );
+
+  const label = doc.createElement("span");
+  label.textContent = "Summarize Comments";
+  button.appendChild(label);
+
+  // Same "act on your edits" cluster — just after Export Comments, still
+  // before pdf.js's own Print.
+  const printButton = doc.getElementById("printButton");
+  group.insertBefore(button, printButton || null);
+
+  toolbarSummarizeCommentsButton = button;
+}
+
 // ---- Blocking pdf.js's own internal "Open File" paths -------------------
 // pdf.js has three ways to open a *different* PDF that completely bypass
 // openPath()/pickAndOpenPdf() below: the "Open File…" entry in its overflow Tools menu
@@ -1387,9 +1567,11 @@ async function loadPdfIntoViewer(app, path, bytes) {
 
   currentPath = path;
   dirty = false;
+  summaryCache = null; // a different document — last summary no longer applies
   if (toolbarSaveButton) toolbarSaveButton.disabled = false;
   if (toolbarUndoAllButton) toolbarUndoAllButton.disabled = false;
   if (toolbarExportCommentsButton) toolbarExportCommentsButton.disabled = false;
+  if (toolbarSummarizeCommentsButton) toolbarSummarizeCommentsButton.disabled = false;
   setStatus(`Open: ${path}`);
   addToRecentFiles(path);
   renderRecentFiles();
@@ -1697,11 +1879,12 @@ async function initializeViewer() {
   // Call order determines left-to-right toolbar order (each injector
   // appends/inserts relative to what's already there) — see the comment
   // above each injector for its cluster. Final layout:
-  // [editor tools] | Undo All, Export Comments, Print | Save
+  // [editor tools] | Undo All, Export Comments, Summarize Comments, Print | Save
   // Open/Previous/Next/Activity Log/Settings moved to the titlebar (see
   // #titlebarDocActions in index.html) — not injected here at all.
   injectUndoAllButton();
   injectExportCommentsButton();
+  injectSummarizeCommentsButton();
   injectSaveButton();
   blockInternalFileOpen(frame.contentDocument);
   attachKeyboardShortcuts(frame.contentDocument);
@@ -1717,6 +1900,7 @@ async function initializeViewer() {
 // waitForViewer() resolves (pdf.js's SPA boot can take a few hundred ms).
 renderRecentFiles();
 updateLandingOpenModeWarning();
+renderAiModelDatalist();
 
 // This is a fresh process, so if long path support was enabled last run it
 // is now actually in effect — drop the "restart to apply" note.
@@ -2337,6 +2521,318 @@ async function exportComments() {
     { toast: true }
   );
 }
+
+// ---- Summarize comments with AI ---------------------------------------
+// Reuses exportComments()'s collection path (collectCommentedAnnotations),
+// but hands the comments to a configurable OpenAI-compatible endpoint via
+// the summarize_comments Tauri command (src/main.rs) and shows the reply
+// in #summaryDialog. The webview never calls the endpoint itself — that
+// keeps the request clear of CORS and any API key out of the renderer.
+// The system prompt lives in src/summary-system-prompt.txt (imported as
+// DEFAULT_SUMMARY_SYSTEM_PROMPT); getAiSystemPrompt() applies the
+// experimental in-dialog override on top of it.
+
+// Some models (Mistral especially) ignore the "no code fence" instruction
+// and wrap the entire reply in ```markdown … ``` anyway. If the whole
+// response is a single fenced block, unwrap it; a response that merely
+// *contains* a fenced block partway through is left untouched.
+function stripOuterCodeFence(text) {
+  const trimmed = (text || "").trim();
+  const match = trimmed.match(/^```[^\n`]*\n([\s\S]*?)\n?```$/);
+  return match ? match[1].trim() : trimmed;
+}
+
+// Flat, token-frugal rendering of the same entries exportComments() writes
+// to Markdown — one block per comment, whitespace collapsed.
+function renderCommentsForPrompt(entries, docTitle) {
+  const lines = [`Document: ${docTitle}`, `Comment count: ${entries.length}`, ``];
+  for (const entry of entries) {
+    lines.push(`--- Page ${entry.pageNumber}${entry.author ? ` — ${entry.author}` : ""}`);
+    if (entry.context) lines.push(`Highlighted text: ${entry.context.replace(/\s+/g, " ")}`);
+    lines.push(`Comment: ${entry.comment.replace(/\s+/g, " ")}`, ``);
+  }
+  return lines.join("\n");
+}
+
+// Suggests "<original's folder>/<name> summary.md" for the summary's Save
+// dialog, matching computeDefaultExportPath's convention.
+async function computeDefaultSummaryPath(originalPath) {
+  const dir = await dirname(originalPath);
+  const base = await basename(originalPath, ".pdf");
+  return join(dir, `${base} summary.md`);
+}
+
+// Markdown of the last successful summary — drives Copy / Save. "" while
+// loading or after an error.
+let lastSummaryMarkdown = "";
+// Result of the last successful run for the currently open document, so a
+// second button press (or reopening the dialog) is instant. Shape:
+// { path, promptKey, model, systemPrompt, markdown }. promptKey is the
+// full user-prompt string, which already encodes every
+// comment/context/author/page — so a mismatch means the comments changed
+// since the summary was made; model/systemPrompt catch a Settings change.
+// Cleared on document change (loadPdfIntoViewer) and by Regenerate.
+let summaryCache = null;
+let summaryInFlight = false;
+// Bumped whenever a run is superseded or stopped. runSummary() captures it
+// and ignores its own late-arriving result if the value has moved on — so
+// the Rust request finishing (or erroring) after Stop can't clobber the UI.
+let summaryRunId = 0;
+let stopButtonArmTimer = null; // see STOP_BUTTON_ARM_MS
+
+function refreshSummaryControls() {
+  // Regenerate ⇄ Stop swap in place; the model field stays editable while a
+  // request runs so a new model can be queued up before stopping.
+  summaryDialogRegenerateButtonEl.hidden = summaryInFlight;
+  summaryDialogStopButtonEl.hidden = !summaryInFlight;
+  const hasResult = !summaryInFlight && lastSummaryMarkdown.length > 0;
+  summaryDialogCopyButtonEl.disabled = !hasResult;
+  summaryDialogSaveButtonEl.disabled = !hasResult;
+}
+
+function setSummaryNotice(text) {
+  summaryDialogNoticeEl.textContent = text || "";
+  summaryDialogNoticeEl.hidden = !text;
+}
+
+function renderSummaryLoading() {
+  lastSummaryMarkdown = "";
+  setSummaryNotice("");
+  summaryDialogBodyEl.className = "is-loading";
+  const spinner = document.createElement("div");
+  spinner.className = "summarySpinner";
+  const label = document.createElement("span");
+  label.textContent = "Summarizing…";
+  summaryDialogBodyEl.replaceChildren(spinner, label);
+  refreshSummaryControls();
+}
+
+function renderSummaryResult(markdown) {
+  lastSummaryMarkdown = markdown;
+  setSummaryNotice("");
+  summaryDialogBodyEl.className = "";
+  summaryDialogBodyEl.textContent = markdown;
+  refreshSummaryControls();
+}
+
+function renderSummaryError(message) {
+  lastSummaryMarkdown = "";
+  setSummaryNotice("");
+  summaryDialogBodyEl.className = "is-error";
+  summaryDialogBodyEl.textContent = message;
+  refreshSummaryControls();
+}
+
+// Called after Stop. If there's a completed summary for this document, keep
+// it on screen (with a note that the new run was abandoned); otherwise fall
+// back to a plain prompt.
+function renderSummaryStopped() {
+  const cached =
+    summaryCache && summaryCache.path === currentPath ? summaryCache.markdown : null;
+  if (cached) {
+    renderSummaryResult(cached);
+    setSummaryNotice("Run stopped — showing the last completed summary.");
+    return;
+  }
+  lastSummaryMarkdown = "";
+  setSummaryNotice("");
+  summaryDialogBodyEl.className = "is-loading"; // reuse the centered muted layout, minus the spinner
+  const label = document.createElement("span");
+  label.textContent = "Stopped. Adjust the model above, then press Regenerate.";
+  summaryDialogBodyEl.replaceChildren(label);
+  refreshSummaryControls();
+}
+
+// Abort an in-flight summary. The Rust side drops the HTTP request (so a
+// local model stops generating and the endpoint is immediately free for a
+// new request); bumping summaryRunId makes runSummary() discard whatever
+// its awaited invoke() eventually returns.
+function stopSummary() {
+  if (!summaryInFlight) return;
+  clearTimeout(stopButtonArmTimer);
+  summaryRunId++;
+  summaryInFlight = false;
+  invoke("cancel_summarize").catch((err) => console.error("cancel_summarize failed:", err));
+  renderSummaryStopped();
+  setStatus("Summary stopped", "", { toast: true });
+}
+
+// Toolbar button: open the dialog immediately, show the cached summary if
+// there is a still-valid one, otherwise kick off a generation. Never
+// blocks on the network before the dialog is visible.
+async function onSummarizeButtonClick() {
+  const app = getViewerApp();
+  if (!app || !app.pdfDocument || !currentPath) return;
+
+  if (!getAiEndpoint()) {
+    setStatus("Set an AI summary endpoint in Settings first", "error", { toast: true });
+    return;
+  }
+
+  summaryModelInputEl.value = getAiModel();
+  renderAiModelDatalist();
+  summaryDialogEl.showModal();
+
+  // A run kicked off earlier is still going (the dialog was closed and
+  // reopened — closing doesn't abort it). Show its progress; don't start
+  // another or touch the cache.
+  if (summaryInFlight) {
+    renderSummaryLoading();
+    return;
+  }
+
+  const cacheValid =
+    summaryCache &&
+    summaryCache.path === currentPath &&
+    summaryCache.model === getAiModel() &&
+    summaryCache.systemPrompt === getAiSystemPrompt();
+
+  if (cacheValid) {
+    renderSummaryResult(summaryCache.markdown);
+    // Re-check against the live comments in the background; if they've
+    // changed since the cached run, regenerate silently.
+    const cachedPromptKey = summaryCache.promptKey;
+    collectCommentedAnnotations(app)
+      .then((entries) => {
+        const promptKey = renderCommentsForPrompt(
+          entries,
+          currentTitleBase || filenameFromPath(currentPath)
+        );
+        if (
+          summaryDialogEl.open &&
+          !summaryInFlight &&
+          summaryCache &&
+          summaryCache.path === currentPath &&
+          promptKey !== cachedPromptKey
+        ) {
+          runSummary();
+        }
+      })
+      .catch(() => {});
+    return;
+  }
+
+  runSummary();
+}
+
+// Always generates: collects the comments fresh, calls the endpoint, and
+// updates the cache. Used for the first run and for the Regenerate button.
+async function runSummary() {
+  if (summaryInFlight) return;
+  const app = getViewerApp();
+  if (!app || !app.pdfDocument || !currentPath) return;
+
+  const endpoint = getAiEndpoint();
+  if (!endpoint) {
+    renderSummaryError("No AI endpoint is set. Add one in Settings.");
+    return;
+  }
+
+  // While the dialog is open its Model field is the source of truth; keep
+  // the persisted setting in step so Settings and the dialog agree.
+  const model = summaryModelInputEl.value.trim() || AI_MODEL_DEFAULT;
+  if (model !== getAiModel()) localStorage.setItem(AI_MODEL_KEY, model);
+
+  // System prompt comes from Settings (or the bundled default).
+  const systemPrompt = getAiSystemPrompt();
+
+  const runId = ++summaryRunId;
+  summaryInFlight = true;
+  renderSummaryLoading();
+  // Briefly ignore Stop clicks so a double-click on Regenerate (now sitting
+  // where Stop appeared) can't instantly cancel this run.
+  summaryDialogStopButtonEl.disabled = true;
+  clearTimeout(stopButtonArmTimer);
+  stopButtonArmTimer = setTimeout(() => {
+    if (summaryInFlight) summaryDialogStopButtonEl.disabled = false;
+  }, STOP_BUTTON_ARM_MS);
+  setStatus("Summarizing comments with AI…");
+
+  try {
+    const entries = await collectCommentedAnnotations(app);
+    if (runId !== summaryRunId) return; // stopped while collecting
+    if (entries.length === 0) {
+      summaryCache = null;
+      renderSummaryError("This document has no comments to summarize.");
+      setStatus("No comments found in this document", "", { toast: true });
+      return;
+    }
+
+    const docTitle = currentTitleBase || filenameFromPath(currentPath);
+    const userPrompt = renderCommentsForPrompt(entries, docTitle);
+
+    const raw = await invoke("summarize_comments", {
+      baseUrl: endpoint,
+      apiKey: getAiApiKey() || null,
+      model,
+      systemPrompt,
+      userPrompt,
+    });
+    if (runId !== summaryRunId) return; // Stop was pressed — ignore this result
+    const markdown = stripOuterCodeFence(raw);
+
+    summaryCache = { path: currentPath, promptKey: userPrompt, model, systemPrompt, markdown };
+    addAiModelToHistory(model);
+    renderSummaryResult(markdown);
+    setStatus(
+      `Summarized ${entries.length} comment${entries.length === 1 ? "" : "s"}`,
+      "",
+      { toast: true }
+    );
+  } catch (err) {
+    if (runId !== summaryRunId) return; // Stop already reset the UI; this is the cancelled request rejecting
+    const message = String(err && err.message ? err.message : err);
+    console.error("Summarize comments failed:", err);
+    renderSummaryError(message);
+    setStatus(`Summarize failed: ${message}`, "error", { toast: true });
+  } finally {
+    if (runId === summaryRunId) {
+      clearTimeout(stopButtonArmTimer);
+      summaryInFlight = false;
+      refreshSummaryControls();
+    }
+  }
+}
+
+summaryDialogRegenerateButtonEl.addEventListener("click", () => {
+  runSummary();
+});
+summaryDialogStopButtonEl.addEventListener("click", () => stopSummary());
+summaryDialogCloseButtonEl.addEventListener("click", () => summaryDialogEl.close());
+summaryDialogEl.addEventListener("click", (event) => {
+  if (event.target === summaryDialogEl) summaryDialogEl.close();
+});
+// Closing the dialog does NOT abort a run in progress — it finishes in the
+// background and its result is cached, so reopening shows it immediately.
+summaryDialogCopyButtonEl.addEventListener("click", async () => {
+  if (!lastSummaryMarkdown) return;
+  try {
+    await navigator.clipboard.writeText(lastSummaryMarkdown);
+    setStatus("Summary copied to clipboard", "", { toast: true });
+  } catch (err) {
+    console.error("Could not copy summary:", err);
+    setStatus("Couldn't copy summary", "error", { toast: true });
+  }
+});
+summaryDialogSaveButtonEl.addEventListener("click", async () => {
+  if (!lastSummaryMarkdown) return;
+  try {
+    const defaultPath = currentPath
+      ? await computeDefaultSummaryPath(currentPath)
+      : "summary.md";
+    const exportPath = await save({
+      title: "Save Summary As",
+      defaultPath,
+      filters: [{ name: "Markdown", extensions: ["md"] }],
+    });
+    if (!exportPath) return; // user cancelled
+    await writeFile(exportPath, new TextEncoder().encode(lastSummaryMarkdown));
+    setStatus(`Saved summary to ${exportPath}`, "", { toast: true });
+  } catch (err) {
+    console.error("Could not save summary:", err);
+    setStatus("Couldn't save summary", "error", { toast: true });
+  }
+});
 
 // Safety net: even mid-typing, don't let unsaved changes sit forever.
 setInterval(() => {

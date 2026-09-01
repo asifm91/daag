@@ -166,11 +166,11 @@
       #logList .log-time { color: var(--fg-muted); margin-right: 8px; }
 
       /* ---- Settings: global commenter name, opened from the toolbar ---- */
-      #settingsDialog { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 0; width: min(360px, 90vw); }
+      #settingsDialog { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 0; width: min(560px, 90vw); }
       #settingsDialog::backdrop { background: var(--overlay); }
       #settingsDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); }
       #settingsDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
-      #settingsDialogBody { padding: 16px; }
+      #settingsDialogBody { padding: 16px; overflow-y: auto; max-height: min(70vh, 560px); }
       #settingsDialogBody label { display: block; font-size: 12px; color: var(--fg-muted); margin-bottom: 6px; }
       #settingsDialogBody label:not(:first-child) { margin-top: 14px; }
       #commenterNameInput, #openModeSelect { width: 100%; box-sizing: border-box; background: var(--input-bg); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; padding: 7px 9px; font-size: 13px; }
@@ -183,6 +183,12 @@
       #enableLongPathButton:disabled { opacity: 0.6; cursor: default; }
       #settingsDialogBody .settings-help { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--fg-muted); }
       #settingsDialogBody .settings-help a { color: inherit; text-decoration: underline; cursor: pointer; }
+      #settingsDialogBody .settings-help code { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; }
+      #aiSummaryRow { margin-top: 14px; }
+      #aiEndpointInput, #aiModelInput, #aiApiKeyInput { width: 100%; box-sizing: border-box; background: var(--input-bg); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; padding: 7px 9px; font-size: 13px; }
+      #aiSystemPromptInput { width: 100%; box-sizing: border-box; resize: vertical; min-height: 120px; background: var(--input-bg); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; padding: 7px 9px; font-size: 12px; font-family: ui-monospace, Consolas, monospace; line-height: 1.45; }
+      #aiSystemPromptRestoreButton { margin-top: 8px; padding: 6px 12px; font-size: 12px; background: var(--surface); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; cursor: pointer; }
+      #aiSystemPromptRestoreButton:hover { background: var(--surface-hover); }
       #settingsDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
       #settingsDialogFooter button { padding: 6px 14px; font-size: 13px; }
 
@@ -220,6 +226,26 @@
       #undoAllDialogFooter button { padding: 6px 14px; font-size: 13px; }
       #undoAllDialogConfirmButton { background: #6b2b2b; border-color: #a33d3d; }
       #undoAllDialogConfirmButton:hover { background: #7e3232; }
+
+      /* ---- AI comment summary result: opened from the toolbar's Summarize Comments button ---- */
+      #summaryDialog { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 0; width: min(640px, 92vw); }
+      #summaryDialog::backdrop { background: var(--overlay); }
+      #summaryDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+      #summaryDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
+      #summaryDialogCloseButton { padding: 4px 10px; font-size: 13px; }
+      #summaryDialogModelRow { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+      #summaryDialogModelRow label { font-size: 12px; color: var(--fg-muted); flex: 0 0 auto; }
+      #summaryModelInput { flex: 1 1 auto; min-width: 0; background: var(--input-bg); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; padding: 6px 9px; font-size: 13px; }
+      #summaryDialogRegenerateButton, #summaryDialogStopButton { flex: 0 0 auto; padding: 6px 12px; font-size: 13px; }
+      #summaryDialogStopButton { color: var(--danger-text); }
+      #summaryDialogBody { padding: 16px; overflow-y: auto; max-height: min(64vh, 520px); font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+      #summaryDialogBody.is-loading { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 120px; white-space: normal; color: var(--fg-muted); }
+      #summaryDialogBody.is-error { color: var(--danger-text); }
+      .summarySpinner { flex: 0 0 auto; width: 18px; height: 18px; border: 2px solid var(--border-strong); border-top-color: var(--fg); border-radius: 50%; animation: summary-spin 0.8s linear infinite; }
+      @keyframes summary-spin { to { transform: rotate(360deg); } }
+      #summaryDialogNotice { margin: 0; padding: 8px 16px; font-size: 12px; color: var(--fg-muted); border-top: 1px solid var(--border); }
+      #summaryDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
+      #summaryDialogFooter button { padding: 6px 14px; font-size: 13px; }
     </style>
   </head>
   <body>
@@ -387,6 +413,30 @@
             <a id="longPathDocLink" href="#">Learn how to enable it manually</a>
           </p>
         </div>
+
+        <div id="aiSummaryRow">
+          <label for="aiEndpointInput">AI summary endpoint</label>
+          <input id="aiEndpointInput" type="text" autocomplete="off" spellcheck="false" placeholder="http://localhost:11434/v1" />
+
+          <label for="aiModelInput">Model</label>
+          <input id="aiModelInput" type="text" list="aiModelHistoryList" autocomplete="off" spellcheck="false" placeholder="llama3.2" />
+
+          <label for="aiApiKeyInput">API key</label>
+          <input id="aiApiKeyInput" type="password" autocomplete="off" placeholder="Leave blank for local models" />
+
+          <p class="settings-help">
+            Powers the toolbar's “Summarize Comments” button. Any
+            OpenAI-compatible <code>/chat/completions</code> endpoint works — a
+            local <a id="ollamaDocLink" href="#">Ollama</a> server (the default),
+            LM Studio, OpenRouter, or OpenAI. Comment text is sent to whichever
+            endpoint you set here, so a local server keeps everything on your
+            machine.
+          </p>
+
+          <label for="aiSystemPromptInput">Summary system prompt</label>
+          <textarea id="aiSystemPromptInput" rows="8" autocomplete="off" spellcheck="false"></textarea>
+          <button id="aiSystemPromptRestoreButton" type="button">Restore default</button>
+        </div>
       </div>
       <div id="settingsDialogFooter">
         <button id="settingsDialogCancelButton" type="button">Cancel</button>
@@ -458,6 +508,29 @@
         <button id="continueOrStartOverDialogContinueButton" type="button">Continue with Copy</button>
       </div>
     </dialog>
+
+    <dialog id="summaryDialog">
+      <div id="summaryDialogHeader">
+        <h2>Comment Summary</h2>
+        <button id="summaryDialogCloseButton" type="button">Close</button>
+      </div>
+      <div id="summaryDialogModelRow">
+        <label for="summaryModelInput">Model</label>
+        <input id="summaryModelInput" type="text" list="aiModelHistoryList" autocomplete="off" spellcheck="false" placeholder="llama3.2" />
+        <button id="summaryDialogStopButton" type="button" hidden>Stop</button>
+        <button id="summaryDialogRegenerateButton" type="button">Regenerate</button>
+      </div>
+      <div id="summaryDialogBody"></div>
+      <p id="summaryDialogNotice" hidden></p>
+      <div id="summaryDialogFooter">
+        <button id="summaryDialogCopyButton" type="button">Copy</button>
+        <button id="summaryDialogSaveButton" type="button">Save as Markdown…</button>
+      </div>
+    </dialog>
+
+    <!-- Shared by both model inputs (Settings + summary dialog); populated
+         from localStorage by renderAiModelDatalist() in main.js. -->
+    <datalist id="aiModelHistoryList"></datalist>
 
     <script type="module" src="./main.js"></script>
   </body>
