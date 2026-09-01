@@ -34,7 +34,17 @@ edges below are things that were actually hit and fixed.
   every annotation in the file outright, not just the ones made this
   session.
 - **Export Comments** — pulls every comment annotation out to a separate
-  file for sharing or review outside the PDF.
+  Markdown file for sharing or review outside the PDF.
+- **Summarize Comments** — sends the document's comments to any
+  OpenAI-compatible `/chat/completions` endpoint (a local Ollama server by
+  default, so nothing leaves the machine unless you point it elsewhere) and
+  shows the summary. Endpoint, model, API key, and system prompt are in
+  Settings.
+- **Quick comments** — right-click a page (or press `Q`) for a small menu
+  of short review phrases you reuse ("not clear", "make it brief", …),
+  most-used first; picking one drops it onto the page as a comment with no
+  dialog. The list starts empty and fills itself as you use phrases and as
+  exporting/summarizing surfaces comments that repeat within a document.
 - **Safe, real drag-and-drop and Ctrl+O** — both open a file through the
   app's own path-tracking instead of pdf.js's built-in (and unsafe, in
   this embedding) file-open handling.
@@ -105,6 +115,13 @@ release you publish by hand.
   you open gets its own window, matching a "review one document at a
   time via Previous/Next, occasionally interrupt for another file"
   workflow better than tabs would.
+- **Ctrl+W** closes the current document back to the landing screen (a
+  real close — it flushes a save first, doesn't reload the window).
+  Browser reload — **F5 / Ctrl+R / Ctrl+Shift+R** — is disabled outright,
+  since an accidental reload mid-annotation would drop the pdf.js editing
+  session; on Windows this also disables the Ctrl+P / Ctrl+F / zoom / F12
+  browser accelerators, but pdf.js provides its own find/print/zoom and
+  DevTools stays on the right-click menu.
 - The PDF is read via Tauri's `fs` plugin and handed to
   `PDFViewerApplication.open({ data: bytes })`. Because the iframe is
   served same-origin by Vite/Tauri, `main.js` reaches directly into

@@ -38,7 +38,10 @@ Vite/Tauri, so no postMessage or blob-URL handoff is needed.
 
 The iframe stays `display:none` (not unloaded) while the landing screen
 shows, so pdf.js and all the hooks below are already warm by the time a
-file is picked.
+file is picked. `showViewer()` calls `frame.contentWindow.focus()` after
+un-hiding it — an iframe doesn't take focus just by becoming visible, and
+without it the iframe-scoped shortcut keys (`attachKeyboardShortcuts`) and
+pdf.js's own key handling stay dead until the first click inside it.
 
 **Ctrl+W closes the open document** back to the landing screen
 (`closeCurrentPdf()`): flush a save if dirty, `PDFViewerApplication.close()`,
