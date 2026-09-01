@@ -501,6 +501,13 @@ figure.shot-fig.toolbar img {
   padding: 8px 10px;
   image-rendering: -webkit-optimize-contrast;
 }
+/* a cropped Settings-dialog shot sitting above its reference table */
+figure.shot-fig.dialog {
+  margin: 4px 0 14px;
+}
+figure.shot-fig.dialog img {
+  max-width: 460px;
+}
 
 /* keyboard-shortcut table */
 .keys {
