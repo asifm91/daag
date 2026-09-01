@@ -67,8 +67,28 @@ const AI_SYSTEM_PROMPT_KEY = "pdfAnnotator.aiSystemPrompt";
 // switching models doesn't mean retyping the whole name.
 const AI_MODEL_HISTORY_KEY = "pdfAnnotator.aiModelHistory";
 const MAX_AI_MODEL_HISTORY = 10;
+// Last model name paired with each provider preset (keyed by the preset id
+// from AI_PROVIDER_PRESETS, plus "custom"): { ollama: "llama3.2", openai:
+// "gpt-4o-mini", ... }. Switching presets restores that preset's own model
+// instead of carrying a foreign one across (e.g. an Ollama tag left in the
+// field when the endpoint is now OpenAI). AI_MODEL_KEY stays the single
+// "current model" the summary feature reads.
+const AI_MODEL_BY_PRESET_KEY = "pdfAnnotator.aiModelByPreset";
 const AI_ENDPOINT_DEFAULT = "http://localhost:11434/v1";
 const AI_MODEL_DEFAULT = "llama3.2";
+// OpenAI-compatible provider presets for the AI summary settings. Picking
+// one from the dropdown fills the endpoint (and a starter model, unless
+// the model field already holds a non-default value) so the common cases
+// don't need the base URL typed in by hand. "Custom" has no entry here
+// and leaves both fields untouched. The endpoint is also matched back
+// against this map to pick which option shows selected when Settings opens.
+const AI_PROVIDER_PRESETS = {
+  ollama: { endpoint: "http://localhost:11434/v1", model: "llama3.2" },
+  lmstudio: { endpoint: "http://localhost:1234/v1", model: "" },
+  openai: { endpoint: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+  openrouter: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-4o-mini" },
+  groq: { endpoint: "https://api.groq.com/openai/v1", model: "llama-3.1-8b-instant" },
+};
 // Set right after the user enables Windows long path support from Settings;
 // cleared on the next app start (a fresh process picks the setting up), so
 // the Settings status can say "restart to apply" only while that's true.
@@ -142,6 +162,7 @@ const updateDialogProgressBarEl = document.querySelector("#updateDialogProgressT
 const updateDialogProgressTextEl = document.getElementById("updateDialogProgressText");
 const updateDialogLaterButtonEl = document.getElementById("updateDialogLaterButton");
 const updateDialogInstallButtonEl = document.getElementById("updateDialogInstallButton");
+const aiProviderPresetSelectEl = document.getElementById("aiProviderPresetSelect");
 const aiEndpointInputEl = document.getElementById("aiEndpointInput");
 const aiModelInputEl = document.getElementById("aiModelInput");
 const aiApiKeyInputEl = document.getElementById("aiApiKeyInput");
@@ -302,6 +323,67 @@ function getAiSystemPrompt() {
   return stored && stored.trim() ? stored : DEFAULT_SUMMARY_SYSTEM_PROMPT.trim();
 }
 
+// ---- AI provider presets (Settings) ---------------------------------
+// The dropdown is pure convenience over the endpoint/model text fields —
+// nothing about a preset is persisted; only the endpoint/model strings it
+// writes are. `custom` means "no preset matches", shown whenever the
+// endpoint has been hand-edited to something not in AI_PROVIDER_PRESETS.
+const normAiEndpoint = (s) => (s || "").trim().replace(/\/+$/, "").toLowerCase();
+
+function aiPresetIdForEndpoint(endpoint) {
+  const target = normAiEndpoint(endpoint);
+  for (const [id, p] of Object.entries(AI_PROVIDER_PRESETS)) {
+    if (normAiEndpoint(p.endpoint) === target) return id;
+  }
+  return "custom";
+}
+
+// Per-preset model memory (AI_MODEL_BY_PRESET_KEY). A plain { presetId:
+// modelName } object; a blank name deletes the entry.
+function getAiModelByPreset() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(AI_MODEL_BY_PRESET_KEY));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function setAiModelForPreset(presetId, model) {
+  const name = (model || "").trim();
+  const map = getAiModelByPreset();
+  if (name) map[presetId] = name;
+  else delete map[presetId];
+  localStorage.setItem(AI_MODEL_BY_PRESET_KEY, JSON.stringify(map));
+}
+
+// The model to show for a preset: its remembered pairing, else the
+// preset's built-in default (empty for "custom").
+function aiModelForPreset(presetId) {
+  const remembered = (getAiModelByPreset()[presetId] || "").trim();
+  return remembered || AI_PROVIDER_PRESETS[presetId]?.model || "";
+}
+
+// Point the dropdown at whatever the endpoint field currently holds —
+// called on dialog open and on every keystroke in the endpoint field.
+function syncAiProviderPresetSelect() {
+  aiProviderPresetSelectEl.value = aiPresetIdForEndpoint(aiEndpointInputEl.value);
+}
+
+aiProviderPresetSelectEl.addEventListener("change", () => {
+  const nextId = aiProviderPresetSelectEl.value;
+  const preset = AI_PROVIDER_PRESETS[nextId];
+  if (!preset) return; // "Custom" — leave endpoint/model as the user set them
+  // Remember the model paired with the preset we're leaving, then swap in
+  // the one this preset was last used with (or its default) so the model
+  // never ends up incompatible with the endpoint.
+  setAiModelForPreset(aiPresetIdForEndpoint(aiEndpointInputEl.value), aiModelInputEl.value);
+  aiEndpointInputEl.value = preset.endpoint;
+  aiModelInputEl.value = aiModelForPreset(nextId);
+  clearAiTestStatus();
+});
+aiEndpointInputEl.addEventListener("input", syncAiProviderPresetSelect);
+
 // ---- Recently-used AI model names ------------------------------------
 // Both model inputs (Settings and the summary dialog) point a <datalist>
 // at this list so the user can pick a previously-used model instead of
@@ -424,6 +506,7 @@ function openSettingsDialog() {
   aiEndpointInputEl.value = getAiEndpoint();
   aiModelInputEl.value = getAiModel();
   aiApiKeyInputEl.value = getAiApiKey();
+  syncAiProviderPresetSelect();
   aiSystemPromptInputEl.value = getAiSystemPrompt();
   clearAiTestStatus(); // a stale result from a previous open shouldn't linger
   renderAiModelDatalist();
@@ -730,6 +813,7 @@ settingsDialogSaveButtonEl.addEventListener("click", () => {
   localStorage.setItem(AI_ENDPOINT_KEY, aiEndpointInputEl.value.trim());
   const modelValue = aiModelInputEl.value.trim();
   localStorage.setItem(AI_MODEL_KEY, modelValue);
+  setAiModelForPreset(aiPresetIdForEndpoint(aiEndpointInputEl.value), modelValue);
   addAiModelToHistory(modelValue);
   localStorage.setItem(AI_API_KEY_KEY, aiApiKeyInputEl.value.trim());
   // Blank, or unchanged from the bundled default → store nothing, so a
@@ -3580,7 +3664,10 @@ async function runSummary() {
   // While the dialog is open its Model field is the source of truth; keep
   // the persisted setting in step so Settings and the dialog agree.
   const model = summaryModelInputEl.value.trim() || AI_MODEL_DEFAULT;
-  if (model !== getAiModel()) localStorage.setItem(AI_MODEL_KEY, model);
+  if (model !== getAiModel()) {
+    localStorage.setItem(AI_MODEL_KEY, model);
+    setAiModelForPreset(aiPresetIdForEndpoint(getAiEndpoint()), model);
+  }
 
   // System prompt comes from Settings (or the bundled default).
   const systemPrompt = getAiSystemPrompt();

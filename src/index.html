@@ -198,7 +198,7 @@
       #settingsPanelAi #aiSummaryRow, #settingsPanelQuick #quickCommentsRow { margin-top: 0; }
       #settingsDialogBody label { display: block; font-size: 12px; color: var(--fg-muted); margin-bottom: 6px; }
       #settingsDialogBody label:not(:first-child) { margin-top: 14px; }
-      #commenterNameInput, #openModeSelect { width: 100%; box-sizing: border-box; background: var(--input-bg); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; padding: 7px 9px; font-size: 13px; }
+      #commenterNameInput, #openModeSelect, #aiProviderPresetSelect { width: 100%; box-sizing: border-box; background: var(--input-bg); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; padding: 7px 9px; font-size: 13px; }
       #longPathRow, #updateRow { margin-top: 14px; }
       #settingsDialogBody .settings-status { margin: 0; font-size: 12px; color: var(--fg-muted); }
       #settingsDialogBody .settings-status[data-state="ok"] { color: var(--success-text); }
@@ -523,6 +523,16 @@
 
         <section id="settingsPanelAi" class="settingsTabPanel" role="tabpanel" aria-labelledby="settingsTabAi" hidden>
           <div id="aiSummaryRow">
+            <label for="aiProviderPresetSelect">Provider preset</label>
+            <select id="aiProviderPresetSelect">
+              <option value="custom">Custom</option>
+              <option value="ollama">Ollama (local)</option>
+              <option value="lmstudio">LM Studio (local)</option>
+              <option value="openai">OpenAI</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="groq">Groq</option>
+            </select>
+
             <label for="aiEndpointInput">AI summary endpoint</label>
             <input id="aiEndpointInput" type="text" autocomplete="off" spellcheck="false" placeholder="http://localhost:11434/v1" />
 
@@ -536,12 +546,13 @@
             <p id="aiTestConnectionStatus" class="settings-status" hidden></p>
 
             <p class="settings-help">
-              Powers the toolbar's “Summarize Comments” button. Any
-              OpenAI-compatible <code>/chat/completions</code> endpoint works — a
-              local <a id="ollamaDocLink" href="#">Ollama</a> server (the default),
-              LM Studio, OpenRouter, or OpenAI. Comment text is sent to whichever
-              endpoint you set here, so a local server keeps everything on your
-              machine.
+              Powers the toolbar's “Summarize Comments” button. Pick a
+              provider preset to fill the endpoint, or choose “Custom” and
+              type any OpenAI-compatible <code>/chat/completions</code> base
+              URL — a local <a id="ollamaDocLink" href="#">Ollama</a> server
+              (the default), LM Studio, OpenRouter, OpenAI, Groq. Comment
+              text is sent to whichever endpoint you set here, so a local
+              server keeps everything on your machine.
             </p>
 
             <label for="aiSystemPromptInput">Summary system prompt</label>

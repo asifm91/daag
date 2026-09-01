@@ -280,6 +280,23 @@ plain `white-space:pre-wrap` box, no Markdown renderer in the app.
   leaves the machine unless the user repoints it. Any OpenAI-compatible
   provider (LM Studio, OpenRouter, OpenAI) works by changing those
   fields.
+- **Provider preset dropdown** (`#aiProviderPresetSelect`) sits above the
+  endpoint field — a convenience over the two text fields, nothing about
+  the choice is persisted on its own. `AI_PROVIDER_PRESETS` (main.js) maps
+  an id (`ollama`/`lmstudio`/`openai`/`openrouter`/`groq`) to an
+  `{ endpoint, model }`; `aiPresetIdForEndpoint()` matches the current
+  endpoint back to one (trailing-slash/case tolerant) or `"custom"` — this
+  drives which option shows selected, re-synced on dialog open and on
+  every keystroke in the endpoint field. Picking a preset overwrites the
+  endpoint field and swaps the model field to that preset's own model.
+- **Model is remembered per preset** (`AI_MODEL_BY_PRESET_KEY`, a
+  `{ presetId: modelName }` object, `"custom"` included) so switching
+  providers never leaves an incompatible model in the field (an Ollama tag
+  against an OpenAI endpoint, say). The preset `change` handler saves the
+  outgoing preset's model, then loads `aiModelForPreset(nextId)` (its
+  remembered pairing, else the built-in default). Written on Settings save
+  and on a model change made from the summary dialog too; `AI_MODEL_KEY`
+  stays the single "current model" the summary request actually reads.
 
 ### Quick comments (right-click / Q)
 A frequency-ranked list of short review phrases ("not clear", "make it
