@@ -635,8 +635,11 @@ aiTestConnectionButtonEl.addEventListener("click", async () => {
 // points reach the check:
 //   - a quiet pass once at startup that only shows UI if there's an update
 //     (a failed check — offline, GitHub down, no release yet — is logged,
-//     never toasted);
-//   - the Settings "Check for updates…" button, which always reports back.
+//     never toasted); it pops the modal dialog only when the user is still
+//     on the landing screen, otherwise just a toast + the Settings-gear dot
+//     so it can't interrupt a PDF opened while the check was in flight;
+//   - the Settings "Check for updates…" button, which always reports back
+//     and always opens the dialog when there's an update.
 // The download/install/relaunch itself only ever runs on an explicit
 // Install click — the app never updates itself without the user saying so.
 let pendingUpdate = null; // the Update handle from a check that found one
@@ -669,21 +672,26 @@ function reflectPendingUpdateBadge() {
 }
 
 // Reflect current state into the Settings "Updates" row every time the
-// dialog opens — the pending-update banner if a check already found one,
-// otherwise just the running version.
+// dialog opens — always leads with the running version, and appends the
+// pending-update note if a check already found one.
 async function refreshUpdateRow() {
   checkUpdateButtonEl.disabled = updateCheckInFlight || updateInstalling;
-  if (pendingUpdate) {
-    setUpdateStatus(`Update available — v${pendingUpdate.version}`, "ok");
-    return;
-  }
-  if (updateCheckInFlight) return;
   let v = "";
   try {
     v = await getVersion();
   } catch {
     /* getVersion only fails outside a Tauri context (plain vite dev) */
   }
+  if (pendingUpdate) {
+    setUpdateStatus(
+      v
+        ? `দাগ v${v} — v${pendingUpdate.version} available`
+        : `Update available — v${pendingUpdate.version}`,
+      "ok"
+    );
+    return;
+  }
+  if (updateCheckInFlight) return;
   setUpdateStatus(v ? `দাগ v${v}` : "দাগ", null);
 }
 
@@ -699,9 +707,17 @@ async function checkForUpdate({ silent }) {
     if (update) {
       pendingUpdate = update;
       reflectPendingUpdateBadge();
-      if (!silent) setUpdateStatus(`Update available — v${update.version}`, "ok");
-      setStatus(`Update available — দাগ v${update.version}`, "", { toast: silent });
-      openUpdateDialog(update);
+      if (silent) {
+        setStatus(`Update available — দাগ v${update.version}`, "", { toast: true });
+        // Startup pass: only interrupt with the modal dialog if the user
+        // is still on the landing screen. If they've opened a PDF while
+        // the check was running, the toast plus the Settings-gear dot are
+        // enough — the dialog is one click away in Settings.
+        if (!currentPath) openUpdateDialog(update);
+      } else {
+        setUpdateStatus(`Update available — v${update.version}`, "ok");
+        openUpdateDialog(update);
+      }
     } else {
       pendingUpdate = null;
       reflectPendingUpdateBadge();

@@ -553,17 +553,24 @@ commands of our own — the plugins expose everything.
   gitignored `.secrets/` dir (see `UPDATER.md`).
 - **Frontend flow** (`checkForUpdate({ silent })` in `main.js`): a quiet
   pass `UPDATE_STARTUP_CHECK_DELAY_MS` after launch that only surfaces UI
-  (toast + `#updateDialog`) if there's genuinely an update — a failed
-  check (offline, no release yet) goes to the activity log only, never a
-  toast. Settings' "Check for updates…" button (`#updateRow`) runs the
-  same check non-silently and always reports back ("Up to date — v…" /
-  the error). `#updateDialog` shows the version + release notes and a
-  progress bar; the actual `downloadAndInstall()` + `relaunch()` only
+  if there's genuinely an update — a failed check (offline, no release
+  yet) goes to the activity log only, never a toast. On that silent pass
+  the modal `#updateDialog` opens **only if no PDF is open** (`currentPath`
+  is null, i.e. still on the landing screen); if a document was opened
+  while the check was in flight, the user gets just the toast plus the
+  Settings-gear notification dot (`reflectPendingUpdateBadge()`), so the
+  check can't interrupt an editing session. Settings' "Check for updates…"
+  button (`#updateRow`) runs the same check non-silently, always reports
+  back ("Up to date — v…" / the error), and always opens the dialog when
+  there's an update. `#updateDialog` shows the version + release notes and
+  a progress bar; the actual `downloadAndInstall()` + `relaunch()` only
   ever runs on an explicit Install click — the app never updates itself
   unattended. `updateInstalling` blocks the dialog's close paths
   (including Escape, via a `cancel` handler) while a download is in
   flight. `getVersion()` from `@tauri-apps/api/app` fills the current
-  version; it throws outside a Tauri context (plain `vite` dev), handled.
+  version (shown in the Settings Updates row even when an update is
+  pending — "দাগ v1.2.0 — v1.3.0 available"); it throws outside a Tauri
+  context (plain `vite` dev), handled.
 
 ### Windows long paths (> MAX_PATH)
 Dragging a PDF whose absolute path exceeds ~259 chars onto the window is
