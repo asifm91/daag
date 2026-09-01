@@ -34,6 +34,9 @@
 //     generating). Done here rather than with fetch() in the webview so it
 //     sidesteps CORS entirely and any API key never enters the renderer.
 //     Cross-platform (no #[cfg]).
+//   - test_ai_connection: a one-token chat request behind the "Test
+//     connection" button in AI settings, reporting reachability / auth /
+//     model validity without running a full summary.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -278,6 +281,67 @@ fn cancel_summarize(task: tauri::State<'_, SummaryTask>) {
     }
 }
 
+/// Lightweight check for the "Test connection" button in AI settings: a
+/// single `max_tokens: 1` chat request against the configured endpoint. A
+/// 2xx back means the URL, model name and API key are all usable; anything
+/// else comes back as the same concise error strings the real summary uses.
+#[tauri::command]
+async fn test_ai_connection(
+    base_url: String,
+    api_key: Option<String>,
+    model: String,
+) -> Result<String, String> {
+    let base = base_url.trim().trim_end_matches('/');
+    if base.is_empty() {
+        return Err("No AI endpoint is configured.".into());
+    }
+    let model = model.trim();
+    if model.is_empty() {
+        return Err("No model name is set.".into());
+    }
+    let url = format!("{base}/chat/completions");
+
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [{ "role": "user", "content": "ping" }],
+        "stream": false,
+        "max_tokens": 1,
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Could not create the HTTP client: {e}"))?;
+
+    let mut req = client.post(&url).json(&body);
+    if let Some(key) = api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+    {
+        req = req.bearer_auth(key);
+    }
+
+    let resp = req.send().await.map_err(|e| {
+        if e.is_timeout() {
+            format!("The AI endpoint at {base} timed out. The model may be too slow, or not running.")
+        } else if e.is_connect() {
+            format!("Could not connect to the AI endpoint at {base}. Is the server running?")
+        } else {
+            format!("Could not reach the AI endpoint at {base}.")
+        }
+    })?;
+
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        return Err(concise_http_error(status, &text));
+    }
+
+    Ok(format!("Connected — \"{model}\" responded."))
+}
+
 async fn run_chat_request(
     base_url: String,
     api_key: Option<String>,
@@ -407,7 +471,8 @@ fn main() {
             enable_long_paths,
             open_external,
             summarize_comments,
-            cancel_summarize
+            cancel_summarize,
+            test_ai_connection
         ])
         .run(tauri::generate_context!())
         .expect("error while running Daag");

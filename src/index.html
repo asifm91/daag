@@ -192,9 +192,10 @@
       #settingsDialogBody .settings-status { margin: 0; font-size: 12px; color: var(--fg-muted); }
       #settingsDialogBody .settings-status[data-state="ok"] { color: var(--success-text); }
       #settingsDialogBody .settings-status[data-state="warn"] { color: var(--danger-text); }
-      #enableLongPathButton, #checkUpdateButton { margin-top: 8px; padding: 6px 12px; font-size: 12px; background: var(--surface); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; cursor: pointer; }
-      #enableLongPathButton:hover:not(:disabled), #checkUpdateButton:hover:not(:disabled) { background: var(--surface-hover); }
-      #enableLongPathButton:disabled, #checkUpdateButton:disabled { opacity: 0.6; cursor: default; }
+      #enableLongPathButton, #checkUpdateButton, #aiTestConnectionButton { margin-top: 8px; padding: 6px 12px; font-size: 12px; background: var(--surface); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; cursor: pointer; }
+      #enableLongPathButton:hover:not(:disabled), #checkUpdateButton:hover:not(:disabled), #aiTestConnectionButton:hover:not(:disabled) { background: var(--surface-hover); }
+      #enableLongPathButton:disabled, #checkUpdateButton:disabled, #aiTestConnectionButton:disabled { opacity: 0.6; cursor: default; }
+      #aiTestConnectionStatus { margin-top: 8px; }
       #settingsDialogBody .settings-help { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--fg-muted); }
       #settingsDialogBody .settings-help a { color: inherit; text-decoration: underline; cursor: pointer; }
       #settingsDialogBody .settings-help code { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; }
@@ -519,6 +520,9 @@
 
             <label for="aiApiKeyInput">API key</label>
             <input id="aiApiKeyInput" type="password" autocomplete="off" placeholder="Leave blank for local models" />
+
+            <button id="aiTestConnectionButton" type="button">Test connection</button>
+            <p id="aiTestConnectionStatus" class="settings-status" hidden></p>
 
             <p class="settings-help">
               Powers the toolbar's “Summarize Comments” button. Any

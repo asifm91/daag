@@ -147,6 +147,8 @@ const aiModelInputEl = document.getElementById("aiModelInput");
 const aiApiKeyInputEl = document.getElementById("aiApiKeyInput");
 const aiSystemPromptInputEl = document.getElementById("aiSystemPromptInput");
 const aiSystemPromptRestoreButtonEl = document.getElementById("aiSystemPromptRestoreButton");
+const aiTestConnectionButtonEl = document.getElementById("aiTestConnectionButton");
+const aiTestConnectionStatusEl = document.getElementById("aiTestConnectionStatus");
 const aiModelHistoryListEl = document.getElementById("aiModelHistoryList");
 const ollamaDocLinkEl = document.getElementById("ollamaDocLink");
 const summaryDialogEl = document.getElementById("summaryDialog");
@@ -423,6 +425,7 @@ function openSettingsDialog() {
   aiModelInputEl.value = getAiModel();
   aiApiKeyInputEl.value = getAiApiKey();
   aiSystemPromptInputEl.value = getAiSystemPrompt();
+  clearAiTestStatus(); // a stale result from a previous open shouldn't linger
   renderAiModelDatalist();
   renderQuickCommentsManageList();
   refreshLongPathStatus(); // fire-and-forget; fills in the status line async
@@ -501,6 +504,40 @@ ollamaDocLinkEl.addEventListener("click", (event) => {
   invoke("open_external", { url: OLLAMA_DOC_URL }).catch((err) => {
     console.error("Could not open the Ollama download page:", err);
   });
+});
+
+// ---- AI settings: "Test connection" -----------------------------------
+// Fires a one-token chat request (test_ai_connection, Rust side) against
+// whatever's currently in the endpoint / model / API key fields — the
+// live field values, not the saved ones, so it can be used to check a
+// change before Save.
+function setAiTestStatus(text, state) {
+  aiTestConnectionStatusEl.hidden = false;
+  aiTestConnectionStatusEl.textContent = text;
+  if (state) aiTestConnectionStatusEl.dataset.state = state;
+  else delete aiTestConnectionStatusEl.dataset.state;
+}
+
+function clearAiTestStatus() {
+  aiTestConnectionStatusEl.hidden = true;
+  aiTestConnectionStatusEl.textContent = "";
+  delete aiTestConnectionStatusEl.dataset.state;
+}
+
+aiTestConnectionButtonEl.addEventListener("click", async () => {
+  const baseUrl = aiEndpointInputEl.value.trim() || AI_ENDPOINT_DEFAULT;
+  const model = aiModelInputEl.value.trim() || AI_MODEL_DEFAULT;
+  const apiKey = aiApiKeyInputEl.value.trim() || null;
+  aiTestConnectionButtonEl.disabled = true;
+  setAiTestStatus("Testing…", null);
+  try {
+    const message = await invoke("test_ai_connection", { baseUrl, apiKey, model });
+    setAiTestStatus(String(message), "ok");
+  } catch (err) {
+    setAiTestStatus(String(err), "warn");
+  } finally {
+    aiTestConnectionButtonEl.disabled = false;
+  }
 });
 
 // ---- Auto-update (Settings + startup) ----------------------------------
