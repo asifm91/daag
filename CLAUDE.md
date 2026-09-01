@@ -625,9 +625,15 @@ page — don't hand-edit either output.
   evergreen download list + macOS Gatekeeper note), and sets it with `gh
   release edit`. `tauri-action`'s inline `releaseBody` is just a
   `"Publishing release notes…"` placeholder — each matrix job would
-  otherwise race to set it. The `verify` job fails early if
-  `CHANGELOG.md` has no section matching `tauri.conf.json`'s version, same
-  spirit as the tag/version check.
+  otherwise race to set it. **`finalize` also patches `latest.json`** —
+  `tauri-action` bakes that file's `notes` field (what the in-app update
+  dialog shows) from the same placeholder `releaseBody`, so `finalize`
+  downloads it, `jq`s `.notes` to the changelog section (no footer — the
+  download links mean nothing to an already-running app), and re-uploads
+  with `--clobber`; skip this and the updater keeps showing "Publishing
+  release notes…". The `verify` job fails early if `CHANGELOG.md` has no
+  section matching `tauri.conf.json`'s version, same spirit as the
+  tag/version check.
 
 ### Windows long paths (> MAX_PATH)
 Dragging a PDF whose absolute path exceeds ~259 chars onto the window is

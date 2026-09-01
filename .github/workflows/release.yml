@@ -164,10 +164,16 @@ jobs:
           cp "$exe" "Daag-portable-x64.exe"
           gh release upload "v${{ steps.version.outputs.version }}" "Daag-portable-x64.exe" --clobber
 
-  # Set the release body once, after every platform build has finished, from
-  # this version's CHANGELOG.md section plus the shared footer. tauri-action
-  # only accepts an inline `releaseBody` string and each matrix job would
-  # race to set it, so the placeholder above is replaced here instead.
+  # Set the release notes once, after every platform build has finished, from
+  # this version's CHANGELOG.md section. tauri-action only accepts an inline
+  # `releaseBody` string and each matrix job would race to set it, so the
+  # placeholder above is replaced here — in *two* places:
+  #   - the GitHub release body: changelog section + the shared footer;
+  #   - latest.json's `notes` (what the in-app update dialog shows): the
+  #     changelog section only. tauri-action bakes `notes` from the
+  #     placeholder releaseBody when it generates latest.json, so it has to
+  #     be patched and re-uploaded here too or the updater keeps showing
+  #     "Publishing release notes…".
   finalize:
     needs: build
     runs-on: ubuntu-latest
@@ -183,12 +189,14 @@ jobs:
           section=$(awk -v ver="$version" '
             index($0, "## [" ver "]") == 1 { grab = 1; next }
             grab && /^(## \[|\[[^]]+\]:)/ { exit }
-            grab { print }
+            grab && (seen || NF) { seen = 1; print }
           ' CHANGELOG.md)
           if [ -z "$(printf '%s' "$section" | tr -d '[:space:]')" ]; then
             echo "::error::No '## [$version]' section in CHANGELOG.md."
             exit 1
           fi
+
+          # GitHub release body: changelog section + shared footer.
           {
             printf '%s\n\n' "$section"
             echo '---'
@@ -199,3 +207,13 @@ jobs:
           cat release-body.md
           echo "------------------------"
           gh release edit "$tag" --notes-file release-body.md
+
+          # latest.json notes: changelog section only (the footer's download
+          # links are useless to an already-running app).
+          gh release download "$tag" --pattern latest.json --output latest.json --clobber
+          jq --arg n "$section" '.notes = $n' latest.json > latest.json.tmp
+          mv latest.json.tmp latest.json
+          echo "----- latest.json -----"
+          cat latest.json
+          echo "-----------------------"
+          gh release upload "$tag" latest.json --clobber
