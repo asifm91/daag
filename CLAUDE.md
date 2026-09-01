@@ -487,12 +487,59 @@ feature, plus an abort path for it, backed by a small `SummaryTask`
 managed-state slot holding the in-flight task handle (see "AI comment
 summary" above). All real logic is in the frontend.
 
-The one bit of Rust that isn't a command is a `setup` hook calling
-`disable_browser_accelerator_keys()` (Windows-only): `with_webview` →
-`ICoreWebView2Settings3::SetAreBrowserAcceleratorKeysEnabled(false)` to
+The one bit of Rust that isn't a command is a `setup` hook. It does two
+things: `disable_browser_accelerator_keys()` (Windows-only): `with_webview`
+→ `ICoreWebView2Settings3::SetAreBrowserAcceleratorKeysEnabled(false)` to
 kill F5 / Ctrl+R reload and the other browser accelerators — see "Two-screen
-UI" above. Pulls `webview2-com` + `windows-core` as direct deps, both
-already in the tree via wry and pinned to the versions it resolves.
+UI" above (pulls `webview2-com` + `windows-core` as direct deps, both
+already in the tree via wry and pinned to the versions it resolves) — and,
+under `#[cfg(desktop)]`, registers the updater + process plugins at runtime
+via `app.handle().plugin(...)` (see "Auto-update" below). Registering them
+in the setup hook rather than the builder chain is the standard Tauri
+pattern for desktop-only plugins.
+
+### Auto-update
+`tauri-plugin-updater` + `tauri-plugin-process`, driven entirely from the
+frontend ("Auto-update (Settings + startup)" section in `main.js`). No Rust
+commands of our own — the plugins expose everything.
+- **Manifest** — `plugins.updater` in `tauri.conf.json` points `endpoints`
+  at `https://github.com/asifm91/daag/releases/latest/download/latest.json`
+  (GitHub's `/releases/latest/` redirect always resolves to the newest
+  *published, non-draft, non-prerelease* release — so a manual
+  `workflow_dispatch` run, which produces a **draft**, never feeds the
+  updater until it's published). `pubkey` is the public half of the
+  minisign keypair from `tauri signer generate`; the private half is the
+  `TAURI_SIGNING_PRIVATE_KEY` GitHub Actions secret. `bundle.
+  createUpdaterArtifacts: true` makes the bundler emit and sign the
+  updater artifacts; `tauri-action` with `includeUpdaterJson: true`
+  (its default when signing keys are set — pinned in the workflow anyway)
+  generates `latest.json` and uploads it to the release. `windows.
+  installMode: "passive"` — the NSIS updater shows a bare progress UI, no
+  prompts.
+- **Per-platform update artifact**: NSIS `-setup.exe` on Windows, the
+  `.AppImage` on Linux (the `.deb` is *not* an updater target — a fresh
+  `.deb` install can't self-update, that's expected), the
+  `Daag_universal.app.tar.gz` on macOS. That last one is why the workflow
+  no longer deletes the macOS `.app.tar.gz` + `.sig` (it used to, back
+  when "this app has no updater" held).
+- **Keypair regen**: `bunx tauri signer generate --ci -p "" -w <path>`.
+  Losing the private key means published updates stop verifying for
+  everyone already on an older build — they'd have to reinstall from the
+  `.dmg`/`.exe`/`.AppImage` by hand. The working copy lives in the
+  gitignored `.secrets/` dir (see `UPDATER.md`).
+- **Frontend flow** (`checkForUpdate({ silent })` in `main.js`): a quiet
+  pass `UPDATE_STARTUP_CHECK_DELAY_MS` after launch that only surfaces UI
+  (toast + `#updateDialog`) if there's genuinely an update — a failed
+  check (offline, no release yet) goes to the activity log only, never a
+  toast. Settings' "Check for updates…" button (`#updateRow`) runs the
+  same check non-silently and always reports back ("Up to date — v…" /
+  the error). `#updateDialog` shows the version + release notes and a
+  progress bar; the actual `downloadAndInstall()` + `relaunch()` only
+  ever runs on an explicit Install click — the app never updates itself
+  unattended. `updateInstalling` blocks the dialog's close paths
+  (including Escape, via a `cancel` handler) while a download is in
+  flight. `getVersion()` from `@tauri-apps/api/app` fills the current
+  version; it throws outside a Tauri context (plain `vite` dev), handled.
 
 ### Windows long paths (> MAX_PATH)
 Dragging a PDF whose absolute path exceeds ~259 chars onto the window is

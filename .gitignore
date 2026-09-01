@@ -10,6 +10,11 @@ src-tauri/target/
 # Tauri auto-generated (regenerated on build)
 src-tauri/gen/
 
+# Updater signing keypair — private key must never be committed. The
+# public half is baked into tauri.conf.json; the private half goes into
+# the TAURI_SIGNING_PRIVATE_KEY GitHub Actions secret. See UPDATER.md.
+.secrets/
+
 # Editor / OS
 .vscode/
 .idea/

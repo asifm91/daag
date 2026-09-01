@@ -385,9 +385,19 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(SummaryTask::default())
-        .setup(|_app| {
+        .setup(|app| {
             #[cfg(windows)]
-            disable_browser_accelerator_keys(_app);
+            disable_browser_accelerator_keys(app);
+            // Auto-update, driven entirely from the frontend
+            // (checkForUpdate() in main.js). The updater plugin is
+            // desktop-only; the process plugin backs the relaunch after an
+            // update is installed.
+            #[cfg(desktop)]
+            {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+                app.handle().plugin(tauri_plugin_process::init())?;
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

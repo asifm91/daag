@@ -75,6 +75,13 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the updater artifacts and generates latest.json. The
+          # private key is the minisign key generated with
+          # `tauri signer generate` (public half lives in
+          # tauri.conf.json > plugins.updater.pubkey). Password env is
+          # optional — empty when the key has none. See UPDATER.md.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           # __VERSION__ is replaced with the version in src-tauri/tauri.conf.json
           tagName: v__VERSION__
@@ -86,11 +93,19 @@ jobs:
             - **Linux** — `*_amd64.AppImage` or `*_amd64.deb`
             - **macOS** — `*_universal.dmg`
 
+            Once installed, Daag checks this releases page for newer
+            versions on launch and can update itself in place (Settings →
+            Check for updates).
+
             **macOS first launch:** the app is unsigned, so Gatekeeper will block it. Right-click the app → Open (macOS 14 and earlier), or open it once then go to System Settings → Privacy & Security → "Open Anyway" (macOS 15+). Or from a terminal: `xattr -dr com.apple.quarantine /Applications/Daag.app`
           # Manual runs produce a draft (no git tag until you publish it);
           # a pushed v* tag publishes the release immediately.
           releaseDraft: ${{ github.event_name == 'workflow_dispatch' }}
           prerelease: false
+          # Upload latest.json (the in-app updater's manifest) to the
+          # release alongside the signed bundles. Default is already true
+          # when signing keys are set; pinned here because it's load-bearing.
+          includeUpdaterJson: true
           args: ${{ matrix.args }}
 
       - name: Read app version
@@ -98,18 +113,9 @@ jobs:
         shell: bash
         run: echo "version=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
 
-      - name: Drop the macOS .app archive from the release
-        if: matrix.platform == 'macos-latest'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Only the .dmg is needed; the .app.tar.gz (+ .sig) is a Tauri
-          # updater artifact and this app has no updater.
-          tag="v${{ steps.version.outputs.version }}"
-          for a in "Daag_universal.app.tar.gz" "Daag_universal.app.tar.gz.sig"; do
-            gh release delete-asset "$tag" "$a" --yes && echo "deleted $a" || echo "not present: $a"
-          done
+      # The macOS .app.tar.gz (+ .sig) is deliberately kept on the release —
+      # it's the artifact the in-app updater pulls on macOS. Fresh installs
+      # still use the .dmg.
 
       - name: Upload standalone Windows exe
         if: matrix.platform == 'windows-latest'

@@ -4,6 +4,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { invoke } from "@tauri-apps/api/core";
 import { dirname, basename, join } from "@tauri-apps/api/path";
+import { getVersion } from "@tauri-apps/api/app";
+import { check as checkTauriUpdate } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 // Default AI summary system prompt — kept in its own plain-text file rather
 // than inline so it's easy to read and tweak. `?raw` inlines it at build.
 import DEFAULT_SUMMARY_SYSTEM_PROMPT from "./summary-system-prompt.txt?raw";
@@ -76,6 +79,11 @@ const LONG_PATH_RESTART_PENDING_KEY = "pdfAnnotator.longPathRestartPending";
 const LONG_PATH_DOC_URL =
   "https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation#enable-long-paths-in-windows-10-version-1607-and-later";
 const OLLAMA_DOC_URL = "https://ollama.com/download";
+// Auto-update. The updater plugin (see src-tauri) points at a GitHub
+// release's latest.json; the check runs once, quietly, a few seconds after
+// launch so it never competes with opening a document, and again on demand
+// from Settings.
+const UPDATE_STARTUP_CHECK_DELAY_MS = 4000;
 
 // "default" keeps the original look (dark chrome, light pdf.js viewer —
 // matches pdf.js's own default toolbar color); "light"/"dark" force both
@@ -121,6 +129,17 @@ const longPathRowEl = document.getElementById("longPathRow");
 const longPathStatusEl = document.getElementById("longPathStatus");
 const enableLongPathButtonEl = document.getElementById("enableLongPathButton");
 const longPathDocLinkEl = document.getElementById("longPathDocLink");
+const updateStatusEl = document.getElementById("updateStatus");
+const checkUpdateButtonEl = document.getElementById("checkUpdateButton");
+const updateDialogEl = document.getElementById("updateDialog");
+const updateDialogCloseButtonEl = document.getElementById("updateDialogCloseButton");
+const updateDialogVersionLineEl = document.getElementById("updateDialogVersionLine");
+const updateDialogNotesEl = document.getElementById("updateDialogNotes");
+const updateDialogProgressEl = document.getElementById("updateDialogProgress");
+const updateDialogProgressBarEl = document.querySelector("#updateDialogProgressTrack > span");
+const updateDialogProgressTextEl = document.getElementById("updateDialogProgressText");
+const updateDialogLaterButtonEl = document.getElementById("updateDialogLaterButton");
+const updateDialogInstallButtonEl = document.getElementById("updateDialogInstallButton");
 const aiEndpointInputEl = document.getElementById("aiEndpointInput");
 const aiModelInputEl = document.getElementById("aiModelInput");
 const aiApiKeyInputEl = document.getElementById("aiApiKeyInput");
@@ -389,6 +408,7 @@ function openSettingsDialog() {
   renderAiModelDatalist();
   renderQuickCommentsManageList();
   refreshLongPathStatus(); // fire-and-forget; fills in the status line async
+  refreshUpdateRow(); // ditto — sets the Updates row (version / pending update)
   settingsDialogEl.showModal();
   commenterNameInputEl.focus();
 }
@@ -464,6 +484,178 @@ ollamaDocLinkEl.addEventListener("click", (event) => {
     console.error("Could not open the Ollama download page:", err);
   });
 });
+
+// ---- Auto-update (Settings + startup) ----------------------------------
+// The updater plugin (src-tauri) checks the GitHub release's latest.json;
+// if a newer *signed* build is published it can be downloaded, installed
+// over the current one and relaunched — all from #updateDialog. Two entry
+// points reach the check:
+//   - a quiet pass once at startup that only shows UI if there's an update
+//     (a failed check — offline, GitHub down, no release yet — is logged,
+//     never toasted);
+//   - the Settings "Check for updates…" button, which always reports back.
+// The download/install/relaunch itself only ever runs on an explicit
+// Install click — the app never updates itself without the user saying so.
+let pendingUpdate = null; // the Update handle from a check that found one
+let updateCheckInFlight = false;
+let updateInstalling = false;
+
+function errText(err) {
+  return String(err?.message || err || "unknown error");
+}
+
+function formatBytes(n) {
+  if (!n) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  return `${(n / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function setUpdateStatus(text, state) {
+  updateStatusEl.textContent = text;
+  if (state) updateStatusEl.dataset.state = state;
+  else delete updateStatusEl.dataset.state;
+}
+
+// Reflect current state into the Settings "Updates" row every time the
+// dialog opens — the pending-update banner if a check already found one,
+// otherwise just the running version.
+async function refreshUpdateRow() {
+  checkUpdateButtonEl.disabled = updateCheckInFlight || updateInstalling;
+  if (pendingUpdate) {
+    setUpdateStatus(`Update available — v${pendingUpdate.version}`, "ok");
+    return;
+  }
+  if (updateCheckInFlight) return;
+  let v = "";
+  try {
+    v = await getVersion();
+  } catch {
+    /* getVersion only fails outside a Tauri context (plain vite dev) */
+  }
+  setUpdateStatus(v ? `দাগ v${v}` : "দাগ", null);
+}
+
+async function checkForUpdate({ silent }) {
+  if (updateCheckInFlight || updateInstalling) return;
+  updateCheckInFlight = true;
+  if (!silent) {
+    checkUpdateButtonEl.disabled = true;
+    setUpdateStatus("Checking for updates…", null);
+  }
+  try {
+    const update = await checkTauriUpdate();
+    if (update) {
+      pendingUpdate = update;
+      if (!silent) setUpdateStatus(`Update available — v${update.version}`, "ok");
+      setStatus(`Update available — দাগ v${update.version}`, "", { toast: silent });
+      openUpdateDialog(update);
+    } else {
+      pendingUpdate = null;
+      if (silent) {
+        setStatus("দাগ is up to date", "");
+      } else {
+        let v = "";
+        try {
+          v = await getVersion();
+        } catch {
+          /* ignore */
+        }
+        setUpdateStatus(v ? `Up to date — দাগ v${v}` : "Up to date", "ok");
+      }
+    }
+  } catch (err) {
+    console.error("Update check failed:", err);
+    if (silent) {
+      setStatus(`Update check skipped — ${errText(err)}`, "");
+    } else {
+      setUpdateStatus(`Couldn't check for updates — ${errText(err)}`, "warn");
+    }
+  } finally {
+    updateCheckInFlight = false;
+    if (!silent) checkUpdateButtonEl.disabled = updateInstalling;
+  }
+}
+
+function openUpdateDialog(update) {
+  updateDialogVersionLineEl.textContent =
+    `Version ${update.version} is available. You're on v${update.currentVersion}.`;
+  updateDialogNotesEl.textContent = (update.body || "").trim();
+  updateDialogProgressEl.hidden = true;
+  updateDialogProgressBarEl.style.width = "0%";
+  updateDialogProgressTextEl.textContent = "";
+  updateDialogInstallButtonEl.disabled = false;
+  updateDialogLaterButtonEl.disabled = false;
+  updateDialogCloseButtonEl.disabled = false;
+  if (!updateDialogEl.open) updateDialogEl.showModal();
+}
+
+updateDialogInstallButtonEl.addEventListener("click", async () => {
+  if (!pendingUpdate || updateInstalling) return;
+  updateInstalling = true;
+  updateDialogInstallButtonEl.disabled = true;
+  updateDialogLaterButtonEl.disabled = true;
+  updateDialogCloseButtonEl.disabled = true;
+  updateDialogProgressEl.hidden = false;
+  updateDialogProgressBarEl.style.width = "0%";
+  updateDialogProgressTextEl.textContent = "Starting download…";
+  setStatus(`Downloading update v${pendingUpdate.version}`, "saving");
+
+  let downloaded = 0;
+  let total = 0;
+  try {
+    await pendingUpdate.downloadAndInstall((event) => {
+      switch (event.event) {
+        case "Started":
+          total = event.data?.contentLength ?? 0;
+          break;
+        case "Progress": {
+          downloaded += event.data?.chunkLength ?? 0;
+          if (total) {
+            const pct = Math.min(100, Math.round((downloaded / total) * 100));
+            updateDialogProgressBarEl.style.width = `${pct}%`;
+            updateDialogProgressTextEl.textContent =
+              `Downloading… ${pct}% (${formatBytes(downloaded)} of ${formatBytes(total)})`;
+          } else {
+            updateDialogProgressTextEl.textContent = `Downloading… ${formatBytes(downloaded)}`;
+          }
+          break;
+        }
+        case "Finished":
+          updateDialogProgressBarEl.style.width = "100%";
+          updateDialogProgressTextEl.textContent = "Installing…";
+          break;
+      }
+    });
+    updateDialogProgressTextEl.textContent = "Update installed — restarting দাগ…";
+    setStatus(`Updated to v${pendingUpdate.version} — restarting`, "", { toast: true });
+    await relaunch();
+  } catch (err) {
+    console.error("Update install failed:", err);
+    updateInstalling = false;
+    updateDialogProgressTextEl.textContent = `Update failed — ${errText(err)}`;
+    updateDialogInstallButtonEl.disabled = false;
+    updateDialogLaterButtonEl.disabled = false;
+    updateDialogCloseButtonEl.disabled = false;
+    setStatus(`Update failed — ${errText(err)}`, "error", { toast: true });
+  }
+});
+
+function dismissUpdateDialog() {
+  if (!updateInstalling) updateDialogEl.close();
+}
+updateDialogLaterButtonEl.addEventListener("click", dismissUpdateDialog);
+updateDialogCloseButtonEl.addEventListener("click", dismissUpdateDialog);
+updateDialogEl.addEventListener("click", (event) => {
+  if (event.target === updateDialogEl) dismissUpdateDialog();
+});
+// Block Escape from closing the dialog while an install is in progress —
+// the download/relaunch keeps running regardless, so hiding it just loses
+// the progress readout.
+updateDialogEl.addEventListener("cancel", (event) => {
+  if (updateInstalling) event.preventDefault();
+});
+checkUpdateButtonEl.addEventListener("click", () => checkForUpdate({ silent: false }));
 
 settingsDialogSaveButtonEl.addEventListener("click", () => {
   setCommenterName(commenterNameInputEl.value.trim());
@@ -2029,6 +2221,14 @@ initializeViewer();
 invoke("get_launch_path").then((path) => {
   if (path) openPath(path);
 });
+
+// ---- Startup update check ---------------------------------------------
+// One quiet pass shortly after launch so it never competes with opening a
+// document. Only surfaces UI (a toast + #updateDialog) if an update is
+// actually available; any failure is logged to the activity log only.
+setTimeout(() => {
+  checkForUpdate({ silent: true });
+}, UPDATE_STARTUP_CHECK_DELAY_MS);
 
 // ---- Hooking comment edits for autosave --------------------------------
 // pdf.js's comment-popup Save button (web/viewer.mjs CommentDialog#save)

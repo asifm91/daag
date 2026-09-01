@@ -14,6 +14,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+# Auto-update: check a GitHub-hosted latest.json, download the signed
+# NSIS / AppImage / .app.tar.gz artifact, install it, and relaunch.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Only used by the summarize_comments command (AI comment summary). rustls

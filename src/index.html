@@ -174,13 +174,13 @@
       #settingsDialogBody label { display: block; font-size: 12px; color: var(--fg-muted); margin-bottom: 6px; }
       #settingsDialogBody label:not(:first-child) { margin-top: 14px; }
       #commenterNameInput, #openModeSelect { width: 100%; box-sizing: border-box; background: var(--input-bg); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; padding: 7px 9px; font-size: 13px; }
-      #longPathRow { margin-top: 14px; }
+      #longPathRow, #updateRow { margin-top: 14px; }
       #settingsDialogBody .settings-status { margin: 0; font-size: 12px; color: var(--fg-muted); }
       #settingsDialogBody .settings-status[data-state="ok"] { color: var(--success-text); }
       #settingsDialogBody .settings-status[data-state="warn"] { color: var(--danger-text); }
-      #enableLongPathButton { margin-top: 8px; padding: 6px 12px; font-size: 12px; background: var(--surface); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; cursor: pointer; }
-      #enableLongPathButton:hover:not(:disabled) { background: var(--surface-hover); }
-      #enableLongPathButton:disabled { opacity: 0.6; cursor: default; }
+      #enableLongPathButton, #checkUpdateButton { margin-top: 8px; padding: 6px 12px; font-size: 12px; background: var(--surface); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; cursor: pointer; }
+      #enableLongPathButton:hover:not(:disabled), #checkUpdateButton:hover:not(:disabled) { background: var(--surface-hover); }
+      #enableLongPathButton:disabled, #checkUpdateButton:disabled { opacity: 0.6; cursor: default; }
       #settingsDialogBody .settings-help { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--fg-muted); }
       #settingsDialogBody .settings-help a { color: inherit; text-decoration: underline; cursor: pointer; }
       #settingsDialogBody .settings-help code { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; }
@@ -246,6 +246,24 @@
       #summaryDialogNotice { margin: 0; padding: 8px 16px; font-size: 12px; color: var(--fg-muted); border-top: 1px solid var(--border); }
       #summaryDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
       #summaryDialogFooter button { padding: 6px 14px; font-size: 13px; }
+
+      /* ---- Auto-update prompt: opened by checkForUpdate() in main.js ---- */
+      #updateDialog { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 0; width: min(520px, 92vw); }
+      #updateDialog::backdrop { background: var(--overlay); }
+      #updateDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+      #updateDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
+      #updateDialogCloseButton { padding: 4px 10px; font-size: 13px; }
+      #updateDialogBody { padding: 16px; overflow-y: auto; max-height: min(60vh, 460px); font-size: 13px; line-height: 1.5; }
+      #updateDialogVersionLine { margin: 0 0 10px; }
+      #updateDialogNotes { margin: 0; font-size: 12px; color: var(--fg-muted); white-space: pre-wrap; word-break: break-word; }
+      #updateDialogNotes:empty { display: none; }
+      #updateDialogProgress { margin-top: 14px; }
+      #updateDialogProgressTrack { height: 6px; border-radius: 3px; background: var(--surface); border: 1px solid var(--border-strong); overflow: hidden; }
+      #updateDialogProgressTrack > span { display: block; height: 100%; width: 0; background: var(--fg-muted); transition: width 0.15s linear; }
+      #updateDialogProgressText { margin: 6px 0 0; font-size: 12px; color: var(--fg-muted); }
+      #updateDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
+      #updateDialogFooter button { padding: 6px 14px; font-size: 13px; }
+      #updateDialogFooter button:disabled { opacity: 0.6; cursor: default; }
 
       /* ---- Quick comment menu: right-click / Q in the viewer. A
          parent-document overlay (not injected into the pdf.js iframe) so it
@@ -455,6 +473,17 @@
           <ul id="quickCommentsManageList"></ul>
         </div>
 
+        <div id="updateRow">
+          <label>Updates</label>
+          <p id="updateStatus" class="settings-status">দাগ</p>
+          <button id="checkUpdateButton" type="button">Check for updates…</button>
+          <p class="settings-help">
+            দাগ checks its GitHub releases page for a newer version on
+            launch. You can also check now — an available update downloads
+            and installs in place, then restarts the app.
+          </p>
+        </div>
+
         <div id="longPathRow" hidden>
           <label>Windows long path support</label>
           <p id="longPathStatus" class="settings-status">Checking…</p>
@@ -579,6 +608,25 @@
       <div id="summaryDialogFooter">
         <button id="summaryDialogCopyButton" type="button">Copy</button>
         <button id="summaryDialogSaveButton" type="button">Save as Markdown…</button>
+      </div>
+    </dialog>
+
+    <dialog id="updateDialog">
+      <div id="updateDialogHeader">
+        <h2>Update Available</h2>
+        <button id="updateDialogCloseButton" type="button">Close</button>
+      </div>
+      <div id="updateDialogBody">
+        <p id="updateDialogVersionLine"></p>
+        <div id="updateDialogNotes"></div>
+        <div id="updateDialogProgress" hidden>
+          <div id="updateDialogProgressTrack"><span></span></div>
+          <p id="updateDialogProgressText"></p>
+        </div>
+      </div>
+      <div id="updateDialogFooter">
+        <button id="updateDialogLaterButton" type="button">Not now</button>
+        <button id="updateDialogInstallButton" type="button">Install &amp; restart</button>
       </div>
     </dialog>
 
