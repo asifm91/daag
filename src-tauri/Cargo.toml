@@ -1,6 +1,6 @@
 [package]
 name = "daag"
-version = "1.4.0"
+version = "1.5.0"
 description = "Daag — local-first PDF annotator with autosave"
 authors = ["Asif Mahmood"]
 license = "MIT"

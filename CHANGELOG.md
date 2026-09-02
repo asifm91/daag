@@ -9,6 +9,8 @@ stays in this file but is left off the website.
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-09-02
+
 ### Added
 
 - **About tab in Settings** — shows the running version (with its release
@@ -100,7 +102,8 @@ stays in this file but is left off the website.
 - The window title tracks the PDF’s own metadata title and shows the full
   file path on hover.
 
-[Unreleased]: https://github.com/asifm91/daag/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/asifm91/daag/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/asifm91/daag/releases/tag/v1.5.0
 [1.4.0]: https://github.com/asifm91/daag/releases/tag/v1.4.0
 [1.3.0]: https://github.com/asifm91/daag/releases/tag/v1.3.0
 [1.2.0]: https://github.com/asifm91/daag/releases/tag/v1.2.0
