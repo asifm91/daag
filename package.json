@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "tauri": "tauri",
-    "changelog": "node scripts/build-changelog.mjs"
+    "changelog": "node scripts/build-changelog.mjs",
+    "release-prep": "node scripts/prepare-release.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",

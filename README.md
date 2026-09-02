@@ -10,7 +10,7 @@ that) can never wipe your work again.
 **Website:** https://asifm91.github.io/daag/ — source in [`docs/`](docs/).
 
 Primarily a Windows app — developed and used on native Windows, which is
-the only platform it's actually been tested on. It's *meant* to build
+the only platform it's actually been tested on. It's _meant_ to build
 and run on Linux and macOS too (the few Windows-only bits — the
 long-path setting, opening help links in a browser — degrade gracefully
 elsewhere), and the release workflow produces those builds, but they're
@@ -20,49 +20,82 @@ edges below are things that were actually hit and fixed.
 
 ## Features
 
-- **Crash-safe autosave** — annotations are baked into the actual PDF
-  file on disk within seconds of the last edit (write-then-rename, so a
-  crash mid-write can't corrupt the file), not just held in memory until
-  a manual save.
-- **Full pdf.js annotation editors** — highlight, freetext, ink/drawing,
-  and comments, all pdf.js's own built-in tooling embedded directly.
-- **Status dot + activity log** — a small titlebar indicator shows
-  idle/dirty/saving/error/saved at a glance; clicking it opens a
-  timestamped log of every save/status event.
-- **Undo All** — reverts to the file's state at the start of the current
-  session (with a confirmation dialog), including an option to strip
-  every annotation in the file outright, not just the ones made this
-  session.
-- **Export Comments** — pulls every comment annotation out to a separate
-  Markdown file for sharing or review outside the PDF.
-- **Summarize Comments** — sends the document's comments to any
-  OpenAI-compatible `/chat/completions` endpoint (a local Ollama server by
-  default, so nothing leaves the machine unless you point it elsewhere) and
-  shows the summary. Endpoint, model, API key, and system prompt are in
-  Settings.
-- **Quick comments** — right-click a page (or press `Q`) for a small menu
-  of short review phrases you reuse ("not clear", "make it brief", …),
-  most-used first; picking one drops it onto the page as a comment with no
-  dialog. The list starts empty and fills itself as you use phrases and as
-  exporting/summarizing surfaces comments that repeat within a document.
-- **Safe, real drag-and-drop and Ctrl+O** — both open a file through the
-  app's own path-tracking instead of pdf.js's built-in (and unsafe, in
-  this embedding) file-open handling.
-- **Overwrite vs. copy on open** — choose whether opening a PDF edits it
-  in place or works on an autosaved copy instead, per file, with the
-  choice remembered for next time.
-- **Recent files** on the landing screen, and a custom titlebar (no
-  native OS chrome) that shows the PDF's own title metadata, with the
-  full file path available as a hover tooltip.
-- **Light / Dark / Default theme toggle** — one button cycles the whole
-  app (landing screen, titlebar, and the pdf.js viewer itself) through
-  three themes; Default keeps a dark landing screen with a light
-  document viewer, matching pdf.js's own conventional look.
-- **Multiple windows, not tabs** — opening another file (via the Open
-  button, "Open with", double-clicking a `.pdf`, or a command-line
-  argument) opens it in its own window rather than replacing what
-  you're currently reviewing, so interrupting your place in one
-  document to annotate another never loses it.
+The editing tools you already know from a browser PDF viewer, in an app
+that writes every change back to the file on disk on its own. (The
+website's [feature list](https://asifm91.github.io/daag/#features) is the
+same, with screenshots.)
+
+- **Highlight, comment, draw** — highlighting, sticky comments, free-text
+  notes, and free-hand ink, all pdf.js's own built-in editors embedded
+  directly.
+- **Crash-safe autosave** — every edit is baked into the actual PDF file
+  within seconds of the last change (write-then-rename, so a crash
+  mid-write can't corrupt it), not held in memory until a manual save.
+- **AI comment summary** — send the document's comments to any
+  OpenAI-compatible `/chat/completions` endpoint (a local Ollama by
+  default, so nothing leaves the machine unless you point it elsewhere)
+  and get a written recap in one click. Endpoint, model, API key, and
+  system prompt are in Settings.
+- **Quick comments** — right-click a page or press `Q` for a menu of the
+  short review phrases you reuse most ("not clear", "make it brief", …),
+  ranked by use and dropped in with no dialog. Starts empty; fills itself
+  from use and from comments that repeat within a document.
+- **Edit in place, or on a copy** — choose per file whether opening a PDF
+  edits the original or an autosaved copy; the choice is remembered for
+  next time.
+- **Work through a folder** — open one PDF and step through the rest of
+  its folder with Previous / Next, like an image viewer, without leaving
+  the app.
+- **Nothing leaves your machine** — fully offline and local-first: no
+  account, no sync, no network at all. A safe fit for confidential
+  documents.
+- **Fast and lightweight** — a small download (< 20 MB) that launches
+  instantly and stays easy on memory with a long PDF open.
+- **Keyboard-first** — the tools you reach for most are a single key
+  away, and the usual viewer shortcuts (`Ctrl+F` to search, etc.) work
+  too.
+
+Also:
+
+- **Light / dark / default theme** — one button flips the whole app, the
+  document view included, with no reload. Default keeps a dark landing
+  screen with a light document viewer, matching pdf.js's own look.
+- **A window per file, not tabs** — opening another PDF (Open button,
+  "Open with", double-clicking a `.pdf`, a command-line argument) never
+  disturbs the one you're already reviewing.
+- **Undo All** — roll the file back to how it was when you opened it, or
+  clear every annotation in it outright, from one confirmation dialog.
+- **Built-in updates** — checks GitHub for a newer release on launch and
+  from Settings; downloads and installs only on your confirmation, then
+  restarts.
+- **Export comments** — pull every comment out into a separate Markdown
+  file to share or review outside the PDF.
+- **Resume where you left off** — reopening a file from the recent-files
+  list jumps straight back to the page and scroll position you left at.
+- **Custom titlebar** — no native OS chrome; shows the PDF's own title
+  metadata, with the full file path available on hover. Window controls
+  come in two styles, switchable in Settings and seeded from your OS:
+  Windows-style minimize / maximize / close on the right, or macOS-style
+  traffic lights on the left.
+- **Status dot & activity log** — a titlebar dot shows saved / saving /
+  unsaved / error at a glance; click it for a timestamped history.
+- **Open it any way** — drag a PDF in, press `Ctrl+O`, use "Open with",
+  double-click a `.pdf`, or pass it on the command line. Every route is
+  intercepted and opened through the app's own safe path handling
+  instead of pdf.js's built-in (and unsafe, in this embedding) file-open,
+  and none of them take over as the system default viewer.
+- **Long path support** — opens deeply nested files past Windows' old
+  260-character limit (drag-and-drop past it needs a one-time Settings
+  toggle).
+- **Find, navigate, zoom** — full-text search with match highlighting,
+  go-to-page, thumbnail and outline panels, zoom / fit / rotate, and
+  single-page / two-page / full-screen layouts (all pdf.js's own).
+- **Fill in PDF forms** — type into fields and tick checkboxes; values
+  save into the file like any annotation.
+- **Insert an image** — drop a picture onto the page, e.g. to stamp a
+  scanned signature where one's needed.
+- **Print** — directly from the app, annotations included, with a preview
+  and page selection.
 
 ## Setup
 
@@ -77,7 +110,7 @@ edges below are things that were actually hit and fixed.
    `src/public/` (Vite's `publicDir`) — anywhere else in `src/` is served
    fine by the dev server but silently omitted from `vite build`'s output,
    since the iframe points at it via a runtime string (`frame.src =
-   "pdfjs/web/viewer.html"` in main.js), not a static import Vite's build
+"pdfjs/web/viewer.html"` in main.js), not a static import Vite's build
    can trace. (Already vendored/committed in this repo — only needed if
    you're setting this up somewhere without that history.)
 4. `bun run tauri dev`
@@ -89,16 +122,65 @@ Prebuilt binaries come from the `Release` GitHub Actions workflow
 a `v*` tag is pushed — never on an ordinary push:
 
 - **Windows** — NSIS installer plus a standalone portable `.exe`
-- **Linux** — AppImage *(untested)*
-- **macOS** — universal (Intel + Apple Silicon) `.dmg` *(untested)*
+- **Linux** — AppImage plus `.deb` _(untested)_
+- **macOS** — universal (Intel + Apple Silicon) `.dmg` _(untested)_
 
 Only the Windows build has actually been run; the Linux and macOS
 artifacts compile in CI but haven't been verified on a real machine.
 The builds are unsigned, so Windows SmartScreen and macOS Gatekeeper
-warn on first run. To cut a release, bump the version in `package.json`,
-`src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml` so they match,
-then push a `v<version>` tag; a manual run instead produces a draft
-release you publish by hand.
+warn on first run.
+
+**Built-in updater.** Once installed, the app checks its GitHub releases
+page on launch (and on demand from Settings → _Check for updates_) and
+can download and install a newer release in place, then restart. It's
+`tauri-plugin-updater` pointed at
+`releases/latest/download/latest.json`; the updater artifacts are signed
+in CI with a minisign key (see `UPDATER.md`). Only the _latest published_
+release ever feeds the updater — a manual workflow run produces a draft,
+which doesn't count until you publish it.
+
+**Cutting a release:**
+
+1. `bun run release-prep <x.y.z>` (`scripts/prepare-release.mjs`) does the
+   local prep and stops before pushing:
+   - moves the `## [Unreleased]` entries in `CHANGELOG.md` into a new
+     `## [x.y.z] — YYYY-MM-DD` section and updates the reference links;
+   - regenerates `docs/changelog.html` (committed — GitHub Pages serves
+     `docs/` as-is; CI fails the release if it's stale);
+   - bumps the version in `package.json`, `src-tauri/tauri.conf.json`,
+     `src-tauri/Cargo.toml`, and `src-tauri/Cargo.lock`;
+   - stages exactly those files, commits as `Release v<x.y.z>`, and tags
+     `v<x.y.z>`.
+
+   `--dry-run` shows the plan and changes nothing; `--no-git` edits the
+   files but skips the commit and tag. `--revert <x.y.z>` undoes a prep
+   that hasn't been pushed yet (deletes the tag, drops the `Release`
+   commit, back to the previous version) — it aborts if the tag or commit
+   already reached a remote.
+2. Review the commit, then `git push` and `git push origin v<x.y.z>`. The
+   tag push triggers the workflow; a manual dispatch instead produces a
+   draft release you publish by hand. CI fails fast unless the tag, the
+   `tauri.conf.json` version, and a matching `CHANGELOG.md` section all
+   agree.
+
+## Changelog
+
+`CHANGELOG.md` ([Keep a Changelog](https://keepachangelog.com/) format)
+is the single source for both the GitHub release notes and the website's
+changelog page — don't hand-edit either output:
+
+- **Website** — `scripts/build-changelog.mjs` (via `bun run changelog`)
+  renders `CHANGELOG.md` into `docs/changelog.html`, which is committed.
+  The `verify` CI job runs the same script with `--check` and fails the
+  release if the committed HTML is out of date.
+- **GitHub release** — the workflow's `finalize` job slices out the
+  releasing version's section, appends the shared download footer
+  (`.github/release-body-footer.md`), and sets that as the release body.
+  It also patches the same section into `latest.json`'s `notes` field —
+  that's the text the in-app update dialog shows.
+
+The `## [Unreleased]` section stays at the top of the file between
+releases and is left off the website.
 
 ## How it works
 
@@ -111,17 +193,6 @@ release you publish by hand.
   command line — switches to the viewer; Open/Previous/Next/Activity
   Log/Settings live in the titlebar itself (hidden on the landing
   screen), not inside pdf.js's own toolbar.
-- This is a multi-window app by design, not single-instance: each file
-  you open gets its own window, matching a "review one document at a
-  time via Previous/Next, occasionally interrupt for another file"
-  workflow better than tabs would.
-- **Ctrl+W** closes the current document back to the landing screen (a
-  real close — it flushes a save first, doesn't reload the window).
-  Browser reload — **F5 / Ctrl+R / Ctrl+Shift+R** — is disabled outright,
-  since an accidental reload mid-annotation would drop the pdf.js editing
-  session; on Windows this also disables the Ctrl+P / Ctrl+F / zoom / F12
-  browser accelerators, but pdf.js provides its own find/print/zoom and
-  DevTools stays on the right-click menu.
 - The PDF is read via Tauri's `fs` plugin and handed to
   `PDFViewerApplication.open({ data: bytes })`. Because the iframe is
   served same-origin by Vite/Tauri, `main.js` reaches directly into
@@ -143,6 +214,17 @@ release you publish by hand.
   (falling back to filename), with the full path available as a hover
   tooltip — set directly via Tauri's window API, since pdf.js's own
   title-setting logic is a no-op when embedded in an iframe.
+- This is a multi-window app by design, not single-instance: each file
+  you open gets its own window, matching a "review one document at a
+  time via Previous/Next, occasionally interrupt for another file"
+  workflow better than tabs would.
+- **Ctrl+W** closes the current document back to the landing screen (a
+  real close — it flushes a save first, doesn't reload the window).
+  Browser reload — **F5 / Ctrl+R / Ctrl+Shift+R** — is disabled outright,
+  since an accidental reload mid-annotation would drop the pdf.js editing
+  session; on Windows this also disables the Ctrl+P / Ctrl+F / zoom / F12
+  browser accelerators, but pdf.js provides its own find/print/zoom and
+  DevTools stays on the right-click menu.
 - Theming is a single three-way toggle (Default/Light/Dark) that drives
   the outer chrome via a CSS class swap and the pdf.js viewer itself via
   a live `color-scheme` property change (no iframe reload needed) — see
@@ -156,7 +238,7 @@ release you publish by hand.
   wire up, so it's hidden and replaced with a working one.
 - **Don't use pdf.js's own "Open File" (Tools menu)** — it's blocked
   outright, because it bypasses this app's file-path tracking in a way
-  that would silently corrupt the *previous* file on next autosave. Use
+  that would silently corrupt the _previous_ file on next autosave. Use
   the Open button (landing screen or titlebar), Ctrl+O, or drag-and-drop —
   all three are intercepted and redirected to the same safe picker path,
   never through pdf.js's own handling.
@@ -184,7 +266,7 @@ release you publish by hand.
 - Keep a rolling backup (`file.pdf.bak-<timestamp>`) instead of a single
   `.tmp`, so you can recover from a bad autosave too.
 - Multiple open documents are handled via separate windows, not tabs —
-  see "Multiple windows, not tabs" above. Tabs/split-view *within* one
+  see "A window per file, not tabs" above. Tabs/split-view _within_ one
   window would need the current single-document module-level state
   (`currentPath`, `dirty`, etc.) to become per-document state first — a
   real refactor — for what would likely be a downgrade for the
