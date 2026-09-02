@@ -11,8 +11,9 @@ stays in this file but is left off the website.
 
 ### Added
 
-- **About tab in Settings** — shows the running version and links out to the
-  online guide, the source repository, and the issue tracker.
+- **About tab in Settings** — shows the running version (with its release
+  date), the author, and links out to the online guide, the source
+  repository, and the issue tracker.
 
 ## [1.4.0] — 2026-09-01
 

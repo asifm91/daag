@@ -10,6 +10,9 @@ import { relaunch } from "@tauri-apps/plugin-process";
 // Default AI summary system prompt — kept in its own plain-text file rather
 // than inline so it's easy to read and tweak. `?raw` inlines it at build.
 import DEFAULT_SUMMARY_SYSTEM_PROMPT from "./summary-system-prompt.txt?raw";
+// CHANGELOG.md, inlined at build — the About tab reads the current version's
+// release date out of it.
+import CHANGELOG_RAW from "../CHANGELOG.md?raw";
 
 // ---- State -----------------------------------------------------------
 let currentPath = null; // absolute path of the PDF currently open
@@ -651,9 +654,17 @@ ollamaDocLinkEl.addEventListener("click", (event) => {
 });
 
 // ---- Settings: "About" tab -------------------------------------------
-// Static info panel — the running version plus links out to the project
-// site's guide page and the source repo, opened via open_external (same
+// Static info panel — the running version (plus its release date, pulled
+// from CHANGELOG.md, which is bundled at build via ?raw) and links out to
+// the guide, source repo and issue tracker, opened via open_external (same
 // no-plugin approach as the doc links above).
+function releaseDateForVersion(v) {
+  // Matches "## [1.4.0] — 2026-09-01" (em dash or hyphen separator).
+  const escaped = v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = CHANGELOG_RAW.match(new RegExp(`^## \\[${escaped}\\]\\s*[—-]\\s*(\\d{4}-\\d{2}-\\d{2})`, "m"));
+  return m ? m[1] : null;
+}
+
 async function refreshAboutRow() {
   let v = "";
   try {
@@ -661,7 +672,12 @@ async function refreshAboutRow() {
   } catch {
     /* getVersion only fails outside a Tauri context (plain vite dev) */
   }
-  aboutVersionLineEl.textContent = v ? `Version ${v}` : "Version —";
+  if (!v) {
+    aboutVersionLineEl.textContent = "Version —";
+    return;
+  }
+  const date = releaseDateForVersion(v);
+  aboutVersionLineEl.textContent = date ? `Version ${v} — ${date}` : `Version ${v}`;
 }
 
 aboutGuideLinkEl.addEventListener("click", (event) => {
