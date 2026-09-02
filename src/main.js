@@ -105,10 +105,11 @@ const LONG_PATH_RESTART_PENDING_KEY = "pdfAnnotator.longPathRestartPending";
 const LONG_PATH_DOC_URL =
   "https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation#enable-long-paths-in-windows-10-version-1607-and-later";
 const OLLAMA_DOC_URL = "https://ollama.com/download";
-// Project website (GitHub Pages) guide page + source repo, linked from the
-// Settings "About" tab.
+// Guide page (GitHub Pages), source repo, and issue tracker — linked from
+// the Settings "About" tab.
 const GUIDE_URL = "https://asifm91.github.io/daag/guide.html";
 const REPO_URL = "https://github.com/asifm91/daag";
+const ISSUES_URL = "https://github.com/asifm91/daag/issues";
 // Auto-update. The updater plugin (see src-tauri) points at a GitHub
 // release's latest.json; the check runs once, quietly, a few seconds after
 // launch so it never competes with opening a document, and again on demand
@@ -189,6 +190,7 @@ const ollamaDocLinkEl = document.getElementById("ollamaDocLink");
 const aboutVersionLineEl = document.getElementById("aboutVersionLine");
 const aboutGuideLinkEl = document.getElementById("aboutGuideLink");
 const aboutRepoLinkEl = document.getElementById("aboutRepoLink");
+const aboutIssuesLinkEl = document.getElementById("aboutIssuesLink");
 const summaryDialogEl = document.getElementById("summaryDialog");
 const summaryDialogCloseButtonEl = document.getElementById("summaryDialogCloseButton");
 const summaryModelInputEl = document.getElementById("summaryModelInput");
@@ -673,6 +675,13 @@ aboutRepoLinkEl.addEventListener("click", (event) => {
   event.preventDefault();
   invoke("open_external", { url: REPO_URL }).catch((err) => {
     console.error("Could not open the source repository:", err);
+  });
+});
+
+aboutIssuesLinkEl.addEventListener("click", (event) => {
+  event.preventDefault();
+  invoke("open_external", { url: ISSUES_URL }).catch((err) => {
+    console.error("Could not open the issues page:", err);
   });
 });
 
