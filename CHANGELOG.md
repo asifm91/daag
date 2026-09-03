@@ -9,6 +9,14 @@ stays in this file but is left off the website.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Keyboard shortcuts going dead after closing a dialog** — closing
+  Settings, the Activity Log, or any other dialog (via its close button,
+  clicking outside, or Escape) left keyboard shortcuts and pdf.js's own key
+  handling unresponsive until you clicked back inside the document. Focus
+  now returns to the viewer automatically.
+
 ## [1.5.0] — 2026-09-02
 
 ### Added

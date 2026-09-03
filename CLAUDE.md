@@ -361,7 +361,10 @@ dialog**. All in `main.js`'s "Quick comments" section.
   pulls keyboard focus out of the iframe — so `closeQuickCommentMenu()`
   calls `frame.contentWindow.focus()` on every dismissal path (Escape,
   click-away, pick, scroll) or the iframe-scoped shortcuts and pdf.js's own
-  key handling stay dead until the iframe is clicked.
+  key handling stay dead until the iframe is clicked. Native `<dialog>`s
+  (Settings, etc.) have the same problem via a different, simpler fix —
+  see "Closing any native `<dialog>` drops focus..." under pdf.js
+  embedding specifics below.
 - **pdf.js 6.x has no standalone/sticky-note comment** — every comment
   rides a host editor. So all three placement cases end with
   `editor.comment = text` (the exact op `web/viewer.mjs`
@@ -929,6 +932,26 @@ tab or an embedder that replicates browser behavior:
   If ever revisited, start by finding how `PopupElement` instances (or
   their owning `HighlightAnnotationElement`) are reachable from outside —
   they weren't obviously exposed anywhere during this investigation.
+- **Closing any native `<dialog>` drops focus out of the iframe, same
+  as the quick-comment menu above.** `showModal()` parks focus inside the
+  dialog, which lives in the *parent* document; closing it (close button,
+  backdrop click, or Escape — the last bypasses every click handler and
+  is handled by the browser itself) drops focus onto the parent `<body>`,
+  so `attachKeyboardShortcuts` (bound on `frame.contentDocument`) and
+  pdf.js's own key handling go deaf until something inside the iframe is
+  clicked again. Reported as "Settings steals keyboard shortcuts until I
+  click the document." Unlike the quick-comment menu (an overlay `<div>`
+  with several bespoke dismissal paths to each cover individually), every
+  `<dialog>` fires a native `"close"` event no matter how it closed, so
+  this only needed one listener per dialog
+  (`restoreViewerFocusAfterDialogClose`, wired to all seven —
+  Settings, Activity Log, Update, Summary, Undo All, Overwrite-or-Copy,
+  Continue-or-Start-Over — right after their `const …El = document.
+  getElementById(...)` declarations in `main.js`) rather than one per
+  dismissal path. Guarded on `currentPath` so it's a no-op on the landing
+  screen, where the iframe isn't the thing that should have focus. Any
+  *new* dialog added later needs the same listener, or it will quietly
+  reproduce this bug.
 - The `PDFViewerApplication.open()` argument shape and any other
   Tauri v2 capability/permission identifier strings were originally
   written without being able to run/verify them — if either throws or

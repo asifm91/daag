@@ -222,6 +222,32 @@ const continueOrStartOverDialogStartOverButtonEl = document.getElementById("cont
 const continueOrStartOverDialogContinueButtonEl = document.getElementById("continueOrStartOverDialogContinueButton");
 const continueOrStartOverDialogPathEl = document.getElementById("continueOrStartOverDialogPath");
 
+// A native <dialog> closing — via its own close button, backdrop click, or
+// Escape (which showModal() handles on its own, bypassing every click
+// handler above) — drops focus onto the parent <body>, out of the iframe.
+// Same issue as closeQuickCommentMenu() below: attachKeyboardShortcuts
+// (bound on frame.contentDocument) and pdf.js's own key handling go deaf
+// until something inside the iframe is clicked again. The native "close"
+// event fires no matter which of those paths closed the dialog, so hanging
+// one listener per dialog here covers all of them in one place. Only
+// restore focus when a document is actually open — currentPath is null on
+// the landing screen, where the iframe isn't the thing that should have
+// focus.
+function restoreViewerFocusAfterDialogClose() {
+  if (currentPath) frame.contentWindow?.focus();
+}
+for (const dialogEl of [
+  logDialogEl,
+  settingsDialogEl,
+  updateDialogEl,
+  summaryDialogEl,
+  undoAllDialogEl,
+  overwriteCopyDialogEl,
+  continueOrStartOverDialogEl,
+]) {
+  dialogEl.addEventListener("close", restoreViewerFocusAfterDialogClose);
+}
+
 // ---- Status reporting ----------------------------------------------------
 // Every status update — dirty/saving/saved/error, however minor — always
 // goes to the console and the activity log (appendLogEntry), so the full
