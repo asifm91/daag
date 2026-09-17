@@ -879,10 +879,83 @@ async function checkForUpdate({ silent }) {
   }
 }
 
+// update.body is latest.json's `notes` field — the exact CHANGELOG.md
+// section markdown release.yml's finalize job slices out (see "Changelog &
+// release notes" in CLAUDE.md), the same source scripts/build-changelog.mjs
+// renders into the website. Same trust model as that script (content only
+// ever comes from our own CI-generated CHANGELOG.md): raw HTML such as
+// <kbd> is intentionally passed through un-escaped rather than sanitized.
+// Only what this changelog actually uses needs handling — ### headings,
+// "- " list items (with wrapped continuation lines re-joined, same as
+// build-changelog.mjs), and inline **bold**/`code`/[links](url).
+function inlineChangelogMarkdown(s) {
+  return s
+    .replace(/&(?![a-zA-Z#][a-zA-Z0-9]*;)/g, "&amp;")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .trim();
+}
+
+function renderChangelogMarkdown(md) {
+  const blocks = [];
+  let list = null;
+  let item = null;
+  const flushItem = () => {
+    if (item != null && list) list.push(inlineChangelogMarkdown(item));
+    item = null;
+  };
+  const flushList = () => {
+    flushItem();
+    if (list?.length) blocks.push(`<ul>${list.map((it) => `<li>${it}</li>`).join("")}</ul>`);
+    list = null;
+  };
+  for (const line of (md || "").split(/\r?\n/)) {
+    const h3 = line.match(/^###\s+(.+?)\s*$/);
+    if (h3) {
+      flushList();
+      blocks.push(`<h4>${inlineChangelogMarkdown(h3[1])}</h4>`);
+      continue;
+    }
+    const li = line.match(/^[-*]\s+(.+)$/);
+    if (li) {
+      flushItem();
+      list ??= [];
+      item = li[1];
+      continue;
+    }
+    if (item != null && /^\s+\S/.test(line)) {
+      item += " " + line.trim(); // wrapped continuation of the current item
+      continue;
+    }
+    if (line.trim() === "") {
+      flushItem();
+      continue;
+    }
+    flushList();
+    blocks.push(`<p>${inlineChangelogMarkdown(line)}</p>`);
+  }
+  flushList();
+  return blocks.join("");
+}
+
+// Links in the notes (none today, but the format allows them) open in the
+// system browser rather than navigating this window — same open_external
+// convention as every other outbound link in the app (see the Settings
+// About tab links above).
+updateDialogNotesEl.addEventListener("click", (event) => {
+  const link = event.target.closest("a[href]");
+  if (!link) return;
+  event.preventDefault();
+  invoke("open_external", { url: link.getAttribute("href") }).catch((err) => {
+    console.error("Couldn't open link:", err);
+  });
+});
+
 function openUpdateDialog(update) {
   updateDialogVersionLineEl.textContent =
     `Version ${update.version} is available. You're on v${update.currentVersion}.`;
-  updateDialogNotesEl.textContent = (update.body || "").trim();
+  updateDialogNotesEl.innerHTML = renderChangelogMarkdown((update.body || "").trim());
   updateDialogProgressEl.hidden = true;
   updateDialogProgressBarEl.style.width = "0%";
   updateDialogProgressTextEl.textContent = "";

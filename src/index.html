@@ -333,8 +333,16 @@
       #updateDialogCloseButton { padding: 4px 10px; font-size: 13px; }
       #updateDialogBody { padding: 16px; overflow-y: auto; max-height: min(60vh, 460px); font-size: 13px; line-height: 1.5; }
       #updateDialogVersionLine { margin: 0 0 10px; }
-      #updateDialogNotes { margin: 0; font-size: 12px; color: var(--fg-muted); white-space: pre-wrap; word-break: break-word; }
+      #updateDialogNotes { margin: 0; font-size: 12px; color: var(--fg-muted); word-break: break-word; }
       #updateDialogNotes:empty { display: none; }
+      #updateDialogNotes h4 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--fg); }
+      #updateDialogNotes h4:not(:first-child) { margin-top: 10px; }
+      #updateDialogNotes ul { margin: 0; padding-left: 18px; }
+      #updateDialogNotes li { margin: 4px 0; }
+      #updateDialogNotes li + li { margin-top: 6px; }
+      #updateDialogNotes p { margin: 0 0 8px; }
+      #updateDialogNotes a { color: var(--fg); }
+      #updateDialogNotes code { background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; font-size: 11px; }
       #updateDialogProgress { margin-top: 14px; }
       #updateDialogProgressTrack { height: 6px; border-radius: 3px; background: var(--surface); border: 1px solid var(--border-strong); overflow: hidden; }
       #updateDialogProgressTrack > span { display: block; height: 100%; width: 0; background: var(--fg-muted); transition: width 0.15s linear; }
