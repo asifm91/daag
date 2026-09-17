@@ -881,17 +881,32 @@ async function checkForUpdate({ silent }) {
 
 // update.body is latest.json's `notes` field — the exact CHANGELOG.md
 // section markdown release.yml's finalize job slices out (see "Changelog &
-// release notes" in CLAUDE.md), the same source scripts/build-changelog.mjs
-// renders into the website. Same trust model as that script (content only
-// ever comes from our own CI-generated CHANGELOG.md): raw HTML such as
-// <kbd> is intentionally passed through un-escaped rather than sanitized.
-// Only what this changelog actually uses needs handling — ### headings,
-// "- " list items (with wrapped continuation lines re-joined, same as
-// build-changelog.mjs), and inline **bold**/`code`/[links](url).
+// release notes" in CLAUDE.md). Unlike scripts/build-changelog.mjs (which
+// renders the same source into a static website page and leaves raw `<`/`>`
+// alone on the theory that CHANGELOG.md is trusted), this renders straight
+// into this app's *main window* via innerHTML — a window whose fs:scope is
+// unrestricted ("**", see src-tauri/capabilities/default.json) with
+// readFile/writeFile/rename already imported. A stray or malicious
+// <script>/onerror= slipping into a changelog entry (a careless PR review
+// away, not just a full repo compromise) would run with that same
+// filesystem access. So everything is escaped by default; <kbd> — the one
+// piece of literal HTML the changelog format actually uses — is the single
+// explicit exception, re-enabled after escaping rather than by leaving all
+// HTML open.
+function escapeChangelogHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// ### headings, "- " list items (with wrapped continuation lines re-joined,
+// same as build-changelog.mjs), and inline **bold**/`code`/[links](url) are
+// the only constructs this changelog actually uses.
 function inlineChangelogMarkdown(s) {
-  return s
-    .replace(/&(?![a-zA-Z#][a-zA-Z0-9]*;)/g, "&amp;")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+  const escaped = escapeChangelogHtml(s).replace(/&lt;(\/?kbd)&gt;/gi, "<$1>");
+  return escaped
+    .replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+      (_m, label, url) => `<a href="${url.replace(/"/g, "&quot;")}">${label}</a>`
+    )
     .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .trim();
