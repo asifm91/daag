@@ -21,9 +21,10 @@ CI side.
    hand-maintained; nothing generates this.
 3. Commit, then `git tag vx.y.z && git push --tags`.
 4. `tauri-action` builds and signs the bundles, generates `latest.json`,
-   and uploads everything to the release. A pushed tag publishes the
-   release immediately; a manual `workflow_dispatch` run leaves a **draft**
-   that the updater ignores until you publish it (see Notes).
+   and uploads everything to the release, which starts as a **draft**. A
+   pushed tag gets published automatically once every platform succeeds; a
+   manual `workflow_dispatch` run stays a draft until you publish it by
+   hand (see Notes).
 
 ## One-time: add the signing key to GitHub Actions
 
@@ -72,9 +73,17 @@ self-update resumes.
 
 ## Notes
 
-- **`workflow_dispatch` runs produce a draft release.** GitHub's
-  `/releases/latest/` only points at published, non-prerelease releases,
-  so a draft never reaches the updater until you publish it.
+- **Every run creates the release as a draft.** GitHub's
+  `/releases/latest/` only points at published, non-prerelease releases, so
+  a draft never reaches the updater. For a pushed tag, the `finalize` job
+  publishes it automatically — but only once *every* platform has built
+  successfully and the real release notes are in place (see the "Publish"
+  step there); this is what keeps the updater from ever seeing a release
+  that's missing a platform's assets or still showing the "Publishing
+  release notes…" placeholder, which used to happen if the release was
+  published immediately and a platform build was slow or failed. A
+  `workflow_dispatch` run is left as a draft on purpose, for a human to
+  publish by hand once it looks right.
 - **The `.deb` is not an updater target.** A `.deb` install is managed by
   `dpkg`/`apt`; the in-app updater covers the NSIS installer (Windows),
   the AppImage (Linux), and the `.app` (macOS) only.

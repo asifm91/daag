@@ -637,6 +637,23 @@ page — don't hand-edit either output.
   release notes…". The `verify` job fails early if `CHANGELOG.md` has no
   section matching `tauri.conf.json`'s version, same spirit as the
   tag/version check.
+- **Every release is created as a draft, published only once `finalize`
+  finishes.** Used to be that a pushed tag's release published immediately
+  (`releaseDraft` only true for `workflow_dispatch`) — but the release is
+  created by the *first* matrix job to reach that step, well before the
+  other platforms finish (or fail), and before `finalize` gets a turn to
+  patch the notes above. That left `/releases/latest/` — and thus the
+  in-app updater — able to see a real, live release missing platform
+  assets and/or still showing the placeholder body for the entire build
+  window, or indefinitely if a platform build failed (which is exactly
+  what happened releasing v1.5.1: Linux and macOS hit transient CI
+  failures, so `finalize` — needs: build, i.e. the whole matrix — never
+  ran, and the published release sat there Windows-only with placeholder
+  notes). Fixed by making `releaseDraft: true` unconditional and adding a
+  `finalize` step, gated on `github.event_name == 'push'`, that does
+  `gh release edit v$version --draft=false` as the very last thing —
+  after the notes are patched. A `workflow_dispatch` run still needs a
+  human to publish it by hand (see UPDATER.md).
 
 ### Windows long paths (> MAX_PATH)
 Dragging a PDF whose absolute path exceeds ~259 chars onto the window is

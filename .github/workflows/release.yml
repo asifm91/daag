@@ -131,9 +131,18 @@ jobs:
           # with this version's CHANGELOG.md section + the shared footer
           # (.github/release-body-footer.md) once every platform has built.
           releaseBody: "Publishing release notes…"
-          # Manual runs produce a draft (no git tag until you publish it);
-          # a pushed v* tag publishes the release immediately.
-          releaseDraft: ${{ github.event_name == 'workflow_dispatch' }}
+          # Always a draft here, regardless of trigger — a pushed tag used
+          # to publish immediately, which meant `/releases/latest/` (and
+          # thus the in-app updater) could see a half-built release the
+          # moment the first matrix job created it: missing platforms if
+          # others hadn't finished (or had failed), and always the
+          # placeholder releaseBody above until `finalize` got a turn.
+          # `finalize` (needs: build, so only once every platform succeeds)
+          # now does the actual publishing for a pushed tag, after patching
+          # the notes — see the "Publish" step there. A workflow_dispatch
+          # run still stays a draft for a human to publish by hand (see
+          # UPDATER.md).
+          releaseDraft: true
           prerelease: false
           # Upload latest.json (the in-app updater's manifest) to the
           # release alongside the signed bundles. Default is already true
@@ -174,6 +183,11 @@ jobs:
   #     placeholder releaseBody when it generates latest.json, so it has to
   #     be patched and re-uploaded here too or the updater keeps showing
   #     "Publishing release notes…".
+  # Because this job needs: build (the whole matrix, not any single leg —
+  # fail-fast: false means one platform failing doesn't cancel the others,
+  # but this job still only runs once *all* of them succeed), it's also the
+  # right — and only — place to take the release out of draft for a pushed
+  # tag: see the "Publish" step below.
   finalize:
     needs: build
     runs-on: ubuntu-latest
@@ -217,3 +231,17 @@ jobs:
           cat latest.json
           echo "-----------------------"
           gh release upload "$tag" latest.json --clobber
+      - name: Publish (pushed tag only)
+        # releaseDraft is always true out of the build job now (see the
+        # comment there) — a pushed tag's release only goes live here, once
+        # every platform has succeeded and the notes above are real, so
+        # `/releases/latest/` (and the in-app updater) never sees a
+        # half-built release. A workflow_dispatch run is left as a draft on
+        # purpose, for a human to publish by hand — see UPDATER.md.
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          gh release edit "v$version" --draft=false
