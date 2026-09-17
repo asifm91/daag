@@ -9,6 +9,19 @@ stays in this file but is left off the website.
 
 ## [Unreleased]
 
+### Added
+
+- **View changelog** — a link in Settings (General tab, next to the update
+  status, and the About tab) opens the full release history in place,
+  without needing to check for an update first.
+
+### Fixed
+
+- **Update dialog showed raw Markdown** — the release notes shown when an
+  update is available displayed literal Markdown syntax (`**bold**`,
+  `-` list markers) instead of rendered text. Now renders properly,
+  matching the GitHub release page.
+
 ## [1.5.1] — 2026-09-17
 
 ### Fixed
