@@ -172,12 +172,14 @@ const longPathDocLinkEl = document.getElementById("longPathDocLink");
 const updateStatusEl = document.getElementById("updateStatus");
 const checkUpdateButtonEl = document.getElementById("checkUpdateButton");
 const updateDialogEl = document.getElementById("updateDialog");
+const updateDialogTitleEl = document.getElementById("updateDialogTitle");
 const updateDialogCloseButtonEl = document.getElementById("updateDialogCloseButton");
 const updateDialogVersionLineEl = document.getElementById("updateDialogVersionLine");
 const updateDialogNotesEl = document.getElementById("updateDialogNotes");
 const updateDialogProgressEl = document.getElementById("updateDialogProgress");
 const updateDialogProgressBarEl = document.querySelector("#updateDialogProgressTrack > span");
 const updateDialogProgressTextEl = document.getElementById("updateDialogProgressText");
+const updateDialogFooterEl = document.getElementById("updateDialogFooter");
 const updateDialogLaterButtonEl = document.getElementById("updateDialogLaterButton");
 const updateDialogInstallButtonEl = document.getElementById("updateDialogInstallButton");
 const aiProviderPresetSelectEl = document.getElementById("aiProviderPresetSelect");
@@ -194,6 +196,7 @@ const aboutVersionLineEl = document.getElementById("aboutVersionLine");
 const aboutGuideLinkEl = document.getElementById("aboutGuideLink");
 const aboutRepoLinkEl = document.getElementById("aboutRepoLink");
 const aboutIssuesLinkEl = document.getElementById("aboutIssuesLink");
+const aboutChangelogLinkEl = document.getElementById("aboutChangelogLink");
 const summaryDialogEl = document.getElementById("summaryDialog");
 const summaryDialogCloseButtonEl = document.getElementById("summaryDialogCloseButton");
 const summaryModelInputEl = document.getElementById("summaryModelInput");
@@ -954,6 +957,35 @@ function renderChangelogMarkdown(md) {
   return blocks.join("");
 }
 
+// Full multi-release view for Settings' About tab "View changelog" link
+// (openChangelogDialog below) — reuses renderChangelogMarkdown/
+// inlineChangelogMarkdown for each release's own body, but first splits the
+// *whole* file by its "## [x.y.z] — date" headings, same shape
+// scripts/build-changelog.mjs parses for the website, including skipping
+// [Unreleased] and the reference-style "[x.y.z]: url" link definitions at
+// the bottom (which would otherwise fall through renderChangelogMarkdown's
+// "bare paragraph" case and show up as raw link text).
+function renderFullChangelog(md) {
+  const releases = [];
+  let current = null;
+  for (const line of (md || "").split(/\r?\n/)) {
+    if (/^\[[^\]]+\]:\s*\S+/.test(line)) continue; // reference-style link defs
+    const h2 = line.match(/^##\s+\[([^\]]+)\](?:\s+[—-]\s+(.+?))?\s*$/);
+    if (h2) {
+      current = h2[1].trim().toLowerCase() === "unreleased" ? null : { name: h2[1].trim(), date: (h2[2] || "").trim(), lines: [] };
+      if (current) releases.push(current);
+      continue;
+    }
+    current?.lines.push(line);
+  }
+  return releases
+    .map((r) => {
+      const heading = r.date ? `v${r.name} — ${r.date}` : `v${r.name}`;
+      return `<h3>${escapeChangelogHtml(heading)}</h3>${renderChangelogMarkdown(r.lines.join("\n"))}`;
+    })
+    .join("");
+}
+
 // Links in the notes (none today, but the format allows them) open in the
 // system browser rather than navigating this window — same open_external
 // convention as every other outbound link in the app (see the Settings
@@ -968,9 +1000,12 @@ updateDialogNotesEl.addEventListener("click", (event) => {
 });
 
 function openUpdateDialog(update) {
+  updateDialogTitleEl.textContent = "Update Available";
+  updateDialogVersionLineEl.hidden = false;
   updateDialogVersionLineEl.textContent =
     `Version ${update.version} is available. You're on v${update.currentVersion}.`;
   updateDialogNotesEl.innerHTML = renderChangelogMarkdown((update.body || "").trim());
+  updateDialogFooterEl.hidden = false;
   updateDialogProgressEl.hidden = true;
   updateDialogProgressBarEl.style.width = "0%";
   updateDialogProgressTextEl.textContent = "";
@@ -979,6 +1014,30 @@ function openUpdateDialog(update) {
   updateDialogCloseButtonEl.disabled = false;
   if (!updateDialogEl.open) updateDialogEl.showModal();
 }
+
+// Settings About tab's "View changelog" link — reuses #updateDialog (same
+// notes rendering, same dismiss paths) for a read-only, non-update purpose:
+// the Later/Install footer and the "Version X is available" line only make
+// sense for a real pending update, so both are hidden here rather than
+// shown disabled. Guarded on updateInstalling so this can't be used to
+// clobber the title/notes/footer of a dialog that's mid-install — the
+// download keeps running regardless of what the dialog shows, but the
+// progress readout would be lost.
+function openChangelogDialog() {
+  if (updateInstalling) return;
+  updateDialogTitleEl.textContent = "Changelog";
+  updateDialogVersionLineEl.hidden = true;
+  updateDialogNotesEl.innerHTML = renderFullChangelog(CHANGELOG_RAW);
+  updateDialogFooterEl.hidden = true;
+  updateDialogProgressEl.hidden = true;
+  updateDialogCloseButtonEl.disabled = false;
+  if (!updateDialogEl.open) updateDialogEl.showModal();
+}
+
+aboutChangelogLinkEl.addEventListener("click", (event) => {
+  event.preventDefault();
+  openChangelogDialog();
+});
 
 updateDialogInstallButtonEl.addEventListener("click", async () => {
   if (!pendingUpdate || updateInstalling) return;

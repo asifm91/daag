@@ -335,6 +335,10 @@
       #updateDialogVersionLine { margin: 0 0 10px; }
       #updateDialogNotes { margin: 0; font-size: 12px; color: var(--fg-muted); word-break: break-word; }
       #updateDialogNotes:empty { display: none; }
+      /* h3 = a whole release (full-changelog view only, see openChangelogDialog
+         in main.js); h4 = a "### Added/Fixed/…" group within one release. */
+      #updateDialogNotes h3 { margin: 16px 0 6px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13px; font-weight: 700; color: var(--fg); }
+      #updateDialogNotes h3:first-child { margin-top: 0; padding-top: 0; border-top: none; }
       #updateDialogNotes h4 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--fg); }
       #updateDialogNotes h4:not(:first-child) { margin-top: 10px; }
       #updateDialogNotes ul { margin: 0; padding-left: 18px; }
@@ -680,6 +684,8 @@
               <a id="aboutRepoLink" href="#">Source on GitHub</a>
               &nbsp;·&nbsp;
               <a id="aboutIssuesLink" href="#">Report an issue</a>
+              &nbsp;·&nbsp;
+              <a id="aboutChangelogLink" href="#">View changelog</a>
             </p>
           </div>
         </section>
@@ -777,7 +783,7 @@
 
     <dialog id="updateDialog">
       <div id="updateDialogHeader">
-        <h2>Update Available</h2>
+        <h2 id="updateDialogTitle">Update Available</h2>
         <button id="updateDialogCloseButton" type="button">Close</button>
       </div>
       <div id="updateDialogBody">
