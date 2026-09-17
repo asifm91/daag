@@ -1876,6 +1876,20 @@ function disableInternalBeforeUnloadPrompt(app) {
 // there's no active selection (highlightSelection() bails out on
 // `selection.isCollapsed`), same as the real button would.
 //
+// That covers "select text, press C" but not the very next thing you'd
+// want it to do: once that new highlight exists, clicking it (or just
+// having just created it) leaves it *selected*, showing its own small
+// EditorToolbar popup (color/comment/delete) above it — a completely
+// different pdf.js code path from the floating-toolbar-over-a-text-
+// selection case above, and `commentSelection()` has no fallback to it
+// (`document.getSelection()` is collapsed at that point, so it silently
+// no-ops). So when there's no text selection, C instead checks
+// `uiManager.hasSelection`/`firstSelectedEditor` (both plain public
+// getters) and calls `editor.editComment()` directly — the exact method
+// that popup's own comment button ends up calling
+// (`AnnotationEditor#editComment` -> `Comment#edit` ->
+// `uiManager.editComment`, per pdf.mjs).
+//
 // Bare letters mean this needs the same "not while typing" guard pdf.js
 // applies before running its own H/S/R/etc (onKeyDown's curElementTagName
 // check) — without it, typing a comment or free-text annotation
@@ -1933,10 +1947,16 @@ function attachKeyboardShortcuts(doc) {
 
       if (key === "c") {
         const uiManager = getViewerApp()?.pdfViewer?._layerProperties?.annotationEditorUIManager;
-        if (uiManager?.commentSelection) {
-          event.preventDefault();
-          event.stopPropagation();
+        if (!uiManager?.commentSelection) return;
+        const selection = doc.getSelection?.();
+        const hasTextSelection = !!selection && !selection.isCollapsed;
+        if (!hasTextSelection && !uiManager.hasSelection) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (hasTextSelection) {
           uiManager.commentSelection("floating_button");
+        } else {
+          uiManager.firstSelectedEditor?.editComment();
         }
         return;
       }
@@ -3020,10 +3040,15 @@ async function stripAllAnnotations(app) {
 // document (harvestRepeatedComments).
 //
 // pdf.js 6.x has no standalone/sticky-note comment editor — every comment
-// rides a host editor. So each of the three placement cases ends with the
-// same operation the real comment dialog performs, `editor.comment = text`
-// (web/viewer.mjs CommentDialog#save), on a freshly created Highlight
-// editor:
+// rides a host editor. So each placement case ends with the same operation
+// the real comment dialog performs, `editor.comment = text` (web/viewer.mjs
+// CommentDialog#save), either on the editor a preceding highlight already
+// selected or on a freshly created one:
+//   0. no text selected, but an editor is already selected (its own
+//      color/comment/delete popup showing) -> comment on that editor
+//      directly, same uiManager.hasSelection/firstSelectedEditor fallback
+//      the C shortcut uses, instead of creating a redundant new highlight
+//      at the pointer
 //   1. text is selected            -> uiManager.commentSelection() over it
 //   2. no selection, pointer over page text
 //                                  -> synthesize a one-character selection
@@ -3035,7 +3060,8 @@ async function stripAllAnnotations(app) {
 // and createAndAddNewEditor() (same tier as the commentSelection() call the
 // C shortcut already leans on). An empty comment never reaches the document
 // because the phrase is always chosen *before* the annotation is created —
-// there's no create-then-cancel window to leave an orphan highlight.
+// there's no create-then-cancel window to leave an orphan highlight (case 0
+// has no such window at all, since it never creates one).
 
 function getQuickComments() {
   try {
@@ -3273,6 +3299,15 @@ async function insertQuickComment(text, pointer) {
     !selection.isCollapsed &&
     selection.toString().trim().length > 0;
 
+  // Case 0: no text selected, but an existing highlight is already
+  // selected (its own color/comment/delete popup showing, per the same
+  // uiManager.hasSelection/firstSelectedEditor the C shortcut checks) —
+  // comment on that editor instead of creating a fresh one at the pointer.
+  if (!hasRealSelection && uiManager.hasSelection) {
+    applyCommentToEditor(uiManager.firstSelectedEditor, phrase);
+    return;
+  }
+
   // Case 1: comment on whatever text is selected.
   if (hasRealSelection) {
     applyCommentOverSelection(uiManager, phrase);
@@ -3301,6 +3336,21 @@ async function insertQuickComment(text, pointer) {
 
   // Case 3: genuinely blank page area — synthetic Highlight box.
   await applyCommentAtBlankPoint(uiManager, idoc, iwin, pointer, phrase);
+}
+
+// Set a phrase directly on an editor that already exists (Case 0 above) —
+// unlike applyCommentOverSelection/applyCommentAtBlankPoint, never removes
+// the editor on failure: it's a pre-existing annotation the user made, not
+// one this flow just created for the purpose.
+function applyCommentToEditor(editor, phrase) {
+  if (!editor) return;
+  try {
+    editor.comment = phrase;
+    markDirty();
+  } catch (err) {
+    console.error("Couldn't set quick comment on the selected highlight:", err);
+    setStatus("Couldn't add the comment", "error", { toast: true });
+  }
 }
 
 function caretRangeAtPoint(doc, x, y) {
