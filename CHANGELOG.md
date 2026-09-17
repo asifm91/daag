@@ -16,6 +16,16 @@ stays in this file but is left off the website.
   clicking outside, or Escape) left keyboard shortcuts and pdf.js's own key
   handling unresponsive until you clicked back inside the document. Focus
   now returns to the viewer automatically.
+- **Comment (C) and quick comment (Q) shortcuts now work on an
+  already-selected highlight** — pressing either right after making a
+  highlight (rather than before, over a text selection) used to do nothing,
+  or for Q, create a redundant second highlight. Both now act on the
+  highlight that's currently selected.
+- **Select/Hand cursor-tool shortcuts (S/H) now work while a highlight,
+  draw, or other editor tool is active** — previously they silently did
+  nothing until you first turned the active tool off by hand. Turning a
+  tool off with its own shortcut (e.g. pressing F again while Highlight is
+  active) is fixed the same way when a highlight is currently selected.
 
 ## [1.5.0] — 2026-09-02
 
