@@ -500,7 +500,8 @@
             </strong>
             <p>
               <code>*_x64-setup.exe</code> installer, or
-              <code>Daag-portable-x64.exe</code> for no-install use.
+              <code>Daag-portable-x64.exe</code> for no-install use — see the
+              SmartScreen note below if it’s blocked on first run.
             </p>
           </div>
           <div class="card">
@@ -513,8 +514,10 @@
               Linux <span class="tag">experimental</span>
             </strong>
             <p>
-              <code>*_amd64.AppImage</code> or <code>*_amd64.deb</code> —
-              compiles in CI, not yet verified on a real machine.
+              <code>*_amd64.AppImage</code> (run on a real Ubuntu/Zorin
+              machine — see the AppImage note below if it re-prompts on
+              every launch) or <code>*_amd64.deb</code> (not yet verified on
+              a real machine).
             </p>
           </div>
           <div class="card">
@@ -528,7 +531,8 @@
             </strong>
             <p>
               <code>*_universal.dmg</code> (Intel + Apple Silicon). Right-click
-              → Open on first launch.
+              → Open on first launch — see the Gatekeeper note below if that
+              doesn’t let it through.
             </p>
           </div>
         </div>
@@ -547,6 +551,44 @@
             <li>
               <b>Linux / macOS</b> — build from source, or try the experimental
               CI artifacts above.
+            </li>
+          </ul>
+        </div>
+
+        <div class="more">
+          <h3>Troubleshooting first-run warnings</h3>
+          <ul>
+            <li>
+              <b>Windows SmartScreen</b> — the app is unsigned, so the
+              installer/portable <code>.exe</code> shows a blue “Windows
+              protected your PC” screen on first run. Click
+              <b>More info</b>, then <b>Run anyway</b> — this only has to be
+              done once per download.
+            </li>
+            <li>
+              <b>Linux AppImage launcher warning</b> — the AppImage is
+              unsigned too, so GNOME-based file managers (Ubuntu, Zorin,
+              Fedora, …) show an “untrusted launcher” prompt on every
+              double-click, since the trust flag they set doesn’t reliably
+              persist. Run it from a terminal instead
+              (<code>chmod +x Daag_*.AppImage &amp;&amp; ./Daag_*.AppImage</code>),
+              or install
+              <a
+                href="https://github.com/TheAssassin/AppImageLauncher"
+                target="_blank"
+                rel="noopener noreferrer"
+                >AppImageLauncher</a
+              >
+              to integrate it into your app menu and stop the prompt for
+              good.
+            </li>
+            <li>
+              <b>macOS Gatekeeper</b> — the app is unsigned. Right-click →
+              Open, or System Settings → Privacy &amp; Security → “Open
+              Anyway”, can still refuse with a “can’t be opened”/“could not
+              verify” prompt that only offers Move to Bin. If so, clear the
+              quarantine flag from a terminal instead:
+              <code>xattr -cr /Applications/Daag.app</code>.
             </li>
           </ul>
         </div>

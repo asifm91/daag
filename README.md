@@ -122,13 +122,41 @@ Prebuilt binaries come from the `Release` GitHub Actions workflow
 a `v*` tag is pushed — never on an ordinary push:
 
 - **Windows** — NSIS installer plus a standalone portable `.exe`
-- **Linux** — AppImage plus `.deb` _(untested)_
-- **macOS** — universal (Intel + Apple Silicon) `.dmg` _(untested)_
+- **Linux** — AppImage plus `.deb` (`.deb` _untested_)
+- **macOS** — universal (Intel + Apple Silicon) `.dmg`
 
-Only the Windows build has actually been run; the Linux and macOS
-artifacts compile in CI but haven't been verified on a real machine.
-The builds are unsigned, so Windows SmartScreen and macOS Gatekeeper
-warn on first run.
+Windows, the Linux AppImage, and macOS have actually been run; the `.deb`
+hasn't been verified on a real machine. The builds are unsigned, so
+Windows SmartScreen and macOS Gatekeeper warn on first run, and the Linux
+AppImage isn't trusted by GNOME-based file managers by default either.
+
+**macOS Gatekeeper can be stubborn.** The usual bypass (right-click →
+Open, or System Settings → Privacy & Security → "Open Anyway") doesn't
+always work for an unsigned/unnotarized app — it can keep re-showing the
+"Apple could not verify this app" prompt with only Move to Bin/Done as
+options, no way through. If that happens, clear the quarantine attribute
+from a terminal instead:
+
+```sh
+xattr -cr /Applications/Daag.app
+```
+
+(adjust the path if you didn't drag it into `/Applications`).
+
+**Linux AppImage shows a launcher warning every run.** On GNOME-based
+distros (Ubuntu, Zorin, Fedora, …), Nautilus treats an AppImage as an
+untrusted launcher and re-prompts on every double-click from the file
+manager — the "trust" flag it sets doesn't reliably persist, especially
+on filesystems without extended-attribute support. Easiest fixes:
+
+- run it from a terminal instead, which skips the file manager's
+  launcher check entirely: `chmod +x Daag_*.AppImage && ./Daag_*.AppImage`
+- or install [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher),
+  which integrates the AppImage into your app menu and stops the
+  file-manager prompt for good.
+
+(Flathub/Snap packaging would fix this from the file manager path too,
+but isn't set up for this project.)
 
 **Built-in updater.** Once installed, the app checks its GitHub releases
 page on launch (and on demand from Settings → _Check for updates_) and
