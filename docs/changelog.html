@@ -39,6 +39,20 @@
       <section class="wrap">
         <div class="release">
           <h2>
+            v1.5.1
+            <span class="date">2026-09-17</span>
+            <a class="gh" href="https://github.com/asifm91/daag/releases/tag/v1.5.1">see release →</a>
+          </h2>
+          <h3>Fixed</h3>
+          <ul>
+            <li><b>Keyboard shortcuts going dead after closing a dialog</b> — closing Settings, the Activity Log, or any other dialog (via its close button, clicking outside, or Escape) left keyboard shortcuts and pdf.js's own key handling unresponsive until you clicked back inside the document. Focus now returns to the viewer automatically.</li>
+            <li><b>Comment (C) and quick comment (Q) shortcuts now work on an already-selected highlight</b> — pressing either right after making a highlight (rather than before, over a text selection) used to do nothing, or for Q, create a redundant second highlight. Both now act on the highlight that's currently selected.</li>
+            <li><b>Select/Hand cursor-tool shortcuts (S/H) now work while a highlight, draw, or other editor tool is active</b> — previously they silently did nothing until you first turned the active tool off by hand. Turning a tool off with its own shortcut (e.g. pressing F again while Highlight is active) is fixed the same way when a highlight is currently selected.</li>
+          </ul>
+        </div>
+
+        <div class="release">
+          <h2>
             v1.5.0
             <span class="date">2026-09-02</span>
             <a class="gh" href="https://github.com/asifm91/daag/releases/tag/v1.5.0">see release →</a>
