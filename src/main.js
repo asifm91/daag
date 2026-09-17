@@ -1864,6 +1864,11 @@ function disableInternalBeforeUnloadPrompt(app) {
 // P, R, S (cursor tools and page-turning) — so none of these collide.
 // "Images" (Stamp) deliberately has no shortcut.
 //
+// S/H (pdf.js's own Select/Hand cursor-tool shortcuts) are fixed up below
+// to work while an editor tool is active, rather than silently no-opping
+// as they do natively — see the "S/H" comment further down, by the actual
+// handler, for why and how.
+//
 // Comment (C) is deliberately NOT wired to editorCommentButton — that
 // toolbar button toggles AnnotationEditorType.POPUP, which opens the
 // read-only "all comments" sidebar, not "add a comment on the text I just
@@ -1975,12 +1980,69 @@ function attachKeyboardShortcuts(doc) {
         return;
       }
 
+      // S/H (pdf.js's own cursor-tool shortcuts, Select/Hand) do nothing
+      // while an editor tool (Highlight/Draw/...) is active: PDFCursorTools
+      // disables cursor-tool switching entirely for the duration (see
+      // PDFJS_CURSOR_TOOL above) and only restores the *previously* active
+      // cursor tool — whichever that was — once editing mode goes back to
+      // NONE, which otherwise only happens by clicking the active editor
+      // button again. So here: dispatch the same "switch to NONE" event a
+      // toggle-off button click would, then apply the *requested* cursor
+      // tool once that completes, overriding whatever PDFCursorTools was
+      // about to restore on its own. Both `app.eventBus` and
+      // `pdfCursorTools.switchTool` are plain public members (same tier as
+      // annotationEditorUIManager above); annotationEditorMode is a public
+      // getter too.
+      if (key === "s" || key === "h") {
+        const app = getViewerApp();
+        const pdfViewer = app?.pdfViewer;
+        const cursorTools = app?.pdfCursorTools;
+        const uiManager = pdfViewer?._layerProperties?.annotationEditorUIManager;
+        const AET = frame.contentWindow?.pdfjsLib?.AnnotationEditorType;
+        if (!pdfViewer || !cursorTools || !AET) return;
+        if (pdfViewer.annotationEditorMode === AET.NONE) return; // pdf.js's own handler already works
+        event.preventDefault();
+        event.stopPropagation();
+        // A selected editor (its color/comment/delete popup showing) has to
+        // go first — see the comment on unselectAll() below, right before
+        // the mode dispatch, for why.
+        uiManager?.unselectAll();
+        const desiredTool = key === "s" ? PDFJS_CURSOR_TOOL.SELECT : PDFJS_CURSOR_TOOL.HAND;
+        // Our listener is registered (external) after PDFCursorTools' own
+        // (internal) one, and EventBus#dispatch runs every internal
+        // listener before any external one — so by the time this fires,
+        // PDFCursorTools has already restored (and unlocked) the old tool,
+        // and switchTool() below is free to override it instead of bailing.
+        app.eventBus.on(
+          "annotationeditormodechanged",
+          function onEditorModeChanged({ mode }) {
+            if (mode !== AET.NONE) return;
+            app.eventBus.off("annotationeditormodechanged", onEditorModeChanged);
+            cursorTools.switchTool(desiredTool);
+          }
+        );
+        app.eventBus.dispatch("switchannotationeditormode", { mode: AET.NONE });
+        return;
+      }
+
       const buttonId = TOOL_BUTTON_ID_BY_KEY[key];
       if (!buttonId) return;
       const button = doc.getElementById(buttonId);
       if (button && !button.disabled) {
         event.preventDefault();
         event.stopPropagation();
+        // Same "unselect before switching mode" fix as S/H above — without
+        // it, toggling the *same* tool off (F while Highlight is already
+        // active) silently fails whenever a highlight is currently selected
+        // (its own popup toolbar showing): switching mode to NONE tears
+        // down every page's annotationEditorLayer DOM before pdf.js's own
+        // internal unselect gets a chance to run, and unselecting an editor
+        // whose DOM is already gone throws — silently, inside an unawaited
+        // promise chain, so the mode switch never completes and nothing
+        // visibly happens beyond a brief re-render. Switching to a
+        // *different* tool (e.g. D for Ink) never hit this because that
+        // path unselects before touching any DOM.
+        getViewerApp()?.pdfViewer?._layerProperties?.annotationEditorUIManager?.unselectAll();
         button.click();
       }
     },
@@ -2944,6 +3006,14 @@ async function revertToSessionStart({ stripAllAnnotationsToo = false } = {}) {
 // id as the key. Re-verify against the bundled source if this ever stops
 // working after a pdf.js upgrade.
 const PDFJS_ANNOTATION_EDITOR_PREFIX = "pdfjs_internal_editor_";
+
+// pdf.js's own PDFCursorTools.CursorTool enum (web/pdf_cursor_tools.js) —
+// module-private to the viewer, not exported on globalThis.pdfjsLib, so
+// hardcoded the same way as PDFJS_ANNOTATION_EDITOR_PREFIX above. Used by
+// the S/H keyboard-shortcut fix below. Re-verify against the bundled
+// src/pdfjs/web/viewer.mjs if this ever stops working after a pdf.js
+// upgrade.
+const PDFJS_CURSOR_TOOL = { SELECT: 0, HAND: 1 };
 
 // ---- "Undo All" checkbox: stripping every annotation, not just this
 // session's --------------------------------------------------------------
