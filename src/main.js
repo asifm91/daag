@@ -170,6 +170,7 @@ const longPathStatusEl = document.getElementById("longPathStatus");
 const enableLongPathButtonEl = document.getElementById("enableLongPathButton");
 const longPathDocLinkEl = document.getElementById("longPathDocLink");
 const updateStatusEl = document.getElementById("updateStatus");
+const updateRowChangelogLinkEl = document.getElementById("updateRowChangelogLink");
 const checkUpdateButtonEl = document.getElementById("checkUpdateButton");
 const updateDialogEl = document.getElementById("updateDialog");
 const updateDialogTitleEl = document.getElementById("updateDialogTitle");
@@ -1015,14 +1016,17 @@ function openUpdateDialog(update) {
   if (!updateDialogEl.open) updateDialogEl.showModal();
 }
 
-// Settings About tab's "View changelog" link — reuses #updateDialog (same
-// notes rendering, same dismiss paths) for a read-only, non-update purpose:
-// the Later/Install footer and the "Version X is available" line only make
-// sense for a real pending update, so both are hidden here rather than
-// shown disabled. Guarded on updateInstalling so this can't be used to
-// clobber the title/notes/footer of a dialog that's mid-install — the
-// download keeps running regardless of what the dialog shows, but the
-// progress readout would be lost.
+// "View changelog" — one link in the General tab's Updates row (right next
+// to the version status text, in its own #updateStatusLine so it never has
+// to change when setUpdateStatus() rewrites #updateStatus to "Checking…" /
+// "Update available" / an error) and one in the About tab. Both reuse
+// #updateDialog (same notes rendering, same dismiss paths) for a read-only,
+// non-update purpose: the Later/Install footer and the "Version X is
+// available" line only make sense for a real pending update, so both are
+// hidden here rather than shown disabled. Guarded on updateInstalling so
+// this can't be used to clobber the title/notes/footer of a dialog that's
+// mid-install — the download keeps running regardless of what the dialog
+// shows, but the progress readout would be lost.
 function openChangelogDialog() {
   if (updateInstalling) return;
   updateDialogTitleEl.textContent = "Changelog";
@@ -1035,6 +1039,10 @@ function openChangelogDialog() {
 }
 
 aboutChangelogLinkEl.addEventListener("click", (event) => {
+  event.preventDefault();
+  openChangelogDialog();
+});
+updateRowChangelogLinkEl.addEventListener("click", (event) => {
   event.preventDefault();
   openChangelogDialog();
 });

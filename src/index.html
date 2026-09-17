@@ -255,6 +255,12 @@
       #settingsDialogBody .settings-status { margin: 0; font-size: 12px; color: var(--fg-muted); }
       #settingsDialogBody .settings-status[data-state="ok"] { color: var(--success-text); }
       #settingsDialogBody .settings-status[data-state="warn"] { color: var(--danger-text); }
+      /* Keeps "View changelog" on the same line as the version status text
+         (দাগ v1.5.1, or whatever checkForUpdate() currently has it showing)
+         without being part of that text itself — setUpdateStatus() only
+         ever touches #updateStatus, so this link never has to change. */
+      #updateStatusLine { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+      #updateRowChangelogLink { font-size: 12px; color: var(--fg-muted); text-decoration: underline; cursor: pointer; }
       #enableLongPathButton, #checkUpdateButton, #aiTestConnectionButton { margin-top: 8px; padding: 6px 12px; font-size: 12px; background: var(--surface); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; cursor: pointer; }
       #enableLongPathButton:hover:not(:disabled), #checkUpdateButton:hover:not(:disabled), #aiTestConnectionButton:hover:not(:disabled) { background: var(--surface-hover); }
       #enableLongPathButton:disabled, #checkUpdateButton:disabled, #aiTestConnectionButton:disabled { opacity: 0.6; cursor: default; }
@@ -352,6 +358,11 @@
       #updateDialogProgressTrack > span { display: block; height: 100%; width: 0; background: var(--fg-muted); transition: width 0.15s linear; }
       #updateDialogProgressText { margin: 6px 0 0; font-size: 12px; color: var(--fg-muted); }
       #updateDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
+      /* The author `display: flex` above wins over the UA [hidden] rule's
+         display: none (higher specificity) unless restated here — same
+         reason #quickCommentMenu[hidden] exists below. Needed for
+         openChangelogDialog() in main.js to actually hide this footer. */
+      #updateDialogFooter[hidden] { display: none; }
       #updateDialogFooter button { padding: 6px 14px; font-size: 13px; }
       #updateDialogFooter button:disabled { opacity: 0.6; cursor: default; }
 
@@ -587,7 +598,10 @@
 
           <div id="updateRow">
             <label>Updates</label>
-            <p id="updateStatus" class="settings-status">দাগ</p>
+            <div id="updateStatusLine">
+              <p id="updateStatus" class="settings-status">দাগ</p>
+              <a id="updateRowChangelogLink" href="#">View changelog</a>
+            </div>
             <button id="checkUpdateButton" type="button">Check for updates…</button>
             <p class="settings-help">
               দাগ checks its GitHub releases page for a newer version on
