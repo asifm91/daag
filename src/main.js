@@ -7,6 +7,7 @@ import { dirname, basename, join } from "@tauri-apps/api/path";
 import { getVersion } from "@tauri-apps/api/app";
 import { check as checkTauriUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { PDFDocument, PDFName, PDFDict, PDFString } from "pdf-lib";
 // Default AI summary system prompt — kept in its own plain-text file rather
 // than inline so it's easy to read and tweak. `?raw` inlines it at build.
 import DEFAULT_SUMMARY_SYSTEM_PROMPT from "./summary-system-prompt.txt?raw";
@@ -3067,6 +3068,63 @@ function scheduleAutosave() {
 // by revertToSessionStart's strip-all-annotations path to reload the
 // viewer from exactly what was just written to disk, without a second
 // disk read.
+// ---- Stable annotation identity (frontend /NM backfill) ------------------
+// Backfills a UUID into the /NM (unique name) key of every markup
+// annotation that doesn't already have one, run on the saved bytes right
+// before they're written to disk. Idempotent — an annotation that already
+// carries /NM (from a prior save, or a future merge) is left untouched, so
+// this is safe to run on every autosave. Foundation for a possible future
+// cross-device annotation merge feature (see CLAUDE.md's "In progress"
+// section): PDF object numbers aren't usable as identity across two
+// independently-saved forks of the same base file (they can collide), but
+// /NM is stable and content-independent.
+//
+// pdf.js's own annotation read/write path has no concept of /NM at all
+// (verified against the bundled pdf.mjs/pdf.worker.mjs), so this operates
+// on the raw saved bytes via pdf-lib instead of pdf.js — a from-scratch
+// parse/rewrite pass. Two Rust-side libraries (lopdf, pdf-rs) were tried
+// first and ruled out on real annotated PDFs from this app: lopdf's
+// Document::save() leaves a stale /Prev pointer on any document that
+// already has pre-existing incremental-revision history (i.e. most real
+// PDFs), corrupting the file on its next load; pdf-rs fails to even load
+// some real-world files. pdf-lib's save() does a full flatten to a single
+// fresh xref stream on every call rather than an incremental append,
+// which sidesteps that whole bug class — confirmed against the same
+// fixtures lopdf/pdf-rs choked on, across repeated load/backfill/save
+// cycles, with no /Prev anywhere in the output and no NM reassigned on a
+// second pass.
+const NM_SKIP_SUBTYPES = new Set(["/Link", "/Popup", "/Widget"]);
+
+async function ensureAnnotationIds(bytes) {
+  const pdfDoc = await PDFDocument.load(bytes, { updateMetadata: false });
+  let changed = false;
+
+  for (const page of pdfDoc.getPages()) {
+    const annotsRef = page.node.get(PDFName.of("Annots"));
+    if (!annotsRef) continue;
+    const annots = pdfDoc.context.lookup(annotsRef);
+    if (!annots) continue;
+
+    for (let i = 0; i < annots.size(); i++) {
+      const dict = pdfDoc.context.lookup(annots.get(i));
+      if (!(dict instanceof PDFDict)) continue;
+
+      // Link/Popup/Widget aren't reviewer-added markup — same exclusion
+      // stripAllAnnotations() already applies (see CLAUDE.md's "Undo All
+      // flow").
+      const subtype = dict.get(PDFName.of("Subtype"))?.toString();
+      if (NM_SKIP_SUBTYPES.has(subtype)) continue;
+
+      if (dict.get(PDFName.of("NM"))) continue;
+
+      dict.set(PDFName.of("NM"), PDFString.of(crypto.randomUUID()));
+      changed = true;
+    }
+  }
+
+  return changed ? await pdfDoc.save() : bytes;
+}
+
 async function saveNow({ force = false } = {}) {
   if (!currentPath || saveInFlight) return undefined;
   if (!force && !dirty) return undefined;
@@ -3082,15 +3140,26 @@ async function saveNow({ force = false } = {}) {
     // same call the built-in viewer's download button uses internally.
     const bytes = await app.pdfDocument.saveDocument();
 
+    // Backfill /NM (see above). Best-effort: this bookkeeping must never
+    // be able to break the app's core autosave guarantee, so a failure
+    // here is logged and skipped rather than thrown, and the save
+    // proceeds with the pre-backfill bytes.
+    let finalBytes = bytes;
+    try {
+      finalBytes = await ensureAnnotationIds(bytes);
+    } catch (err) {
+      console.error("Annotation ID backfill failed, saving without it:", err);
+    }
+
     // Write-then-rename instead of overwriting directly, so a crash or
     // power loss mid-write can't corrupt the original file.
     const tmpPath = currentPath + ".autosave.tmp";
-    await writeFile(tmpPath, bytes);
+    await writeFile(tmpPath, finalBytes);
     await rename(tmpPath, currentPath);
 
     dirty = false;
     setStatus(`${force ? "Saved" : "Autosaved"} ${new Date().toLocaleTimeString()}`, "", { toast: force });
-    return bytes;
+    return finalBytes;
   } catch (err) {
     console.error("Autosave failed:", err);
     setStatus("Autosave failed", "error", { toast: true });

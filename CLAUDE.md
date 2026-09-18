@@ -1032,28 +1032,59 @@ PDFs from this app — not synthetic edge cases**:
   backfill again → confirm no reassignment) on multiple real annotated
   PDFs.
 
-**Current state**: a working pdf_oxide-based implementation lives on the
-unmerged branch `annotation-nm-backfill-pdf-oxide` (one commit, off
-v1.6.0) — not on master, not shipped, not pushed.
+**Superseded pdf_oxide attempt**: a working pdf_oxide-based implementation
+(Rust-side, vendored patch) lives on the unmerged branch
+`annotation-nm-backfill-pdf-oxide` (one commit, off v1.6.0) — not on
+master, not shipped, not pushed. Kept around for reference but not the
+preferred path once pdf-lib panned out (below): pdf-lib needs no vendored
+patch and matches this project's own stated architecture ("all real logic
+is in the frontend").
 
-**Next step**: try doing the backfill in the *frontend* instead, with
-**pdf-lib** (not jsPDF — that's a from-scratch PDF creation library with
-no ability to load an existing PDF at all, not a candidate here). pdf-lib
-supports setting an arbitrary dictionary key as a normal, publicly
-documented operation (`dict.set(PDFName.of('NM'), PDFString.of(...))`) —
-no vendored patch needed, unlike pdf_oxide. It's also a better fit for
-this project's own stated architecture ("all real logic is in the
-frontend," Rust kept thin for things the frontend genuinely can't do —
-none of which apply to parsing/rewriting PDF bytes). Two open questions
-before committing to it, both need testing against real files rather than
-assumption: whether pdf-lib's `save()` round-trips the same problem files
-that broke lopdf and pdf-rs, and whether it does a clean full flatten (no
-leftover `/Prev`) or something else. The real-world PDF fixtures used to
-test the libraries above aren't in the repo (gitignored —
-`src-tauri/test-fixtures/`, since some contained real student data) —
-regenerate equivalents by autosaving a couple of comments onto any PDF,
-closing, reopening, and saving again (the second save is what actually
-exercises the failure modes above).
+**pdf-lib tried next, in the frontend, and it works**: both open questions
+from the earlier investigation were tested against the same real-world
+fixtures that broke lopdf/pdf-rs
+(`fresh_pdfjs_only.pdf`/`lopdf_own_first_revision.pdf`/
+`repro_invalid_trailer.pdf`, gitignored — see below to regenerate) —
+- `PDFDocument.save()` does a **full flatten to one fresh xref stream on
+  every call**, not an incremental append — confirmed by grepping the
+  output for `/Prev` (zero occurrences, vs. up to 51 in the originals,
+  which do carry real incremental history) and by checking that
+  `startxref` always lands exactly on a valid `N 0 obj … /Size …` xref
+  stream. This sidesteps lopdf's whole bug class structurally: there's no
+  `/Prev` chain for a rewrite to leave stale.
+- It **loads every fixture that defeated pdf-rs** and round-trips 3
+  generations of load → backfill → `save()` → reload with no corruption,
+  stable annotation counts (327/325/327 before and after), and **no `/NM`
+  ever reassigned** on a second or third pass over an already-backfilled
+  file (idempotency holds).
+- Performance on the worst fixture (46 pages, 327 annotations, 314KB):
+  ~125ms load + ~1ms scan + ~85ms save ≈ 210ms total. Runs once per
+  autosave debounce tick (several seconds apart), so this is acceptable,
+  but it's a synchronous full-document parse/rewrite on the JS main
+  thread — worth re-measuring against a much larger real document if one
+  ever surfaces, since it'll scale with total object count, not just
+  annotation count.
+
+**Current state**: implemented directly in `src/main.js` —
+`ensureAnnotationIds()` (mirrors `ensure_annotation_ids`'s exact
+semantics: skip Link/Popup/Widget, skip annotations that already carry
+`/NM`, else set `/NM` to `crypto.randomUUID()`) is called from
+`saveNow()` on the bytes `pdfDocument.saveDocument()` produces, before
+they're written to `tmpPath` — same best-effort/log-and-skip contract as
+the pdf_oxide version. `pdf-lib` is now a normal `package.json`
+dependency. Manually smoke-tested live in the running Tauri app against a
+couple of real PDFs (Open → annotate → Save → reopen) — no errors. Still
+**not yet committed** (sitting as uncommitted changes on top of the
+pdf_oxide-investigation commit) — open decision is whether this
+supersedes the pdf_oxide branch outright (no vendored Rust patch, matches
+the "logic lives in the frontend" architecture) or the two approaches are
+kept side by side a while longer before picking one.
+
+The real-world PDF fixtures used to test all of the libraries above
+aren't in the repo (gitignored — `src-tauri/test-fixtures/`, since some
+contained real student data) — regenerate equivalents by autosaving a
+couple of comments onto any PDF, closing, reopening, and saving again
+(the second save is what actually exercises the failure modes above).
 
 ## Conventions
 - Debounce/timing constants live at the top of `src/main.js`
