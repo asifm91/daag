@@ -20,3 +20,8 @@ src-tauri/gen/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Real-world PDF fixtures used to test the NM-backfill/annotation-identity
+# work — some contain real student data (grades, names), so these stay
+# local-only rather than committed.
+src-tauri/test-fixtures/

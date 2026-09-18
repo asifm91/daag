@@ -976,6 +976,85 @@ tab or an embedder that replicates browser behavior:
   (`bunx tauri info`, and whatever pdf.js version is in
   `src/pdfjs/build/pdf.mjs`) against current docs.
 
+## In progress: cross-device annotation identity (not on master)
+Groundwork for a possible future feature: async collaborative annotation
+— two reviewers each annotate different sections of the same file across
+separate sessions, synced via a shared Drive/OneDrive/Dropbox folder, no
+dedicated server, following draw.io's "dumb file-sync transport + local
+merge" model rather than a Google-Docs-style live server. Not built —
+this section exists purely so a later session doesn't repeat several
+days of already-settled investigation.
+
+**Why this needs annotation identity at all**: a future 3-way merge
+(base/local/remote) needs to know which annotation in one copy of a file
+is "the same" annotation in another independently-saved copy of it.
+PDF object numbers can't serve as that identity — two reviewers who each
+add annotations to their own copy of the same base file can end up with
+new objects at the *same* object number purely by coincidence, since
+numbering just increments locally from the base on each side. The PDF
+spec's actual answer is the annotation dictionary's `/NM` (unique name)
+key — stable and content-independent. pdf.js never writes one (confirmed:
+zero matches for `"NM"` anywhere in the bundled `pdf.mjs`/`pdf.worker.mjs`),
+so the first, foundational piece of this work is backfilling `/NM` onto
+every markup annotation on save, via a Rust command
+(`ensure_annotation_ids`) run on the temp file right before rename, same
+timing as every other autosave step. Best-effort by design — a failure
+here must never block the actual save, so it's wrapped to log-and-skip
+rather than throw.
+
+**Three PDF libraries tried, in that order, all against real annotated
+PDFs from this app — not synthetic edge cases**:
+- **lopdf** — can inject `/NM` fine at the raw-dict level (that part was
+  never the problem), but `Document::save()` leaves a stale `/Prev`
+  pointer on any document that already has pre-existing incremental-
+  revision history before lopdf ever touches it (i.e. most real PDFs,
+  including ones lopdf itself already wrote once) — the newly-written
+  xref stream ends up pointing `/Prev` at a byte offset that no longer
+  holds valid xref/object data in the file actually written.
+  `Document::load()` then fails on the very next load with
+  `Parse(InvalidTrailer)`, and lopdf's own reconstruction fallback can't
+  rescue it either (`find_latest_trailer` only recognizes a literal
+  `trailer` keyword, never present in a pure xref-stream file). Confirmed
+  independent of pdf.js entirely — reproduces on a pure lopdf
+  load→mutate→save round trip with no pdf.js involvement. Root-caused via
+  a locally instrumented lopdf build; not yet confirmed filed upstream.
+- **`pdf` (pdf-rs)** — fails to even *load* some of the same real-world
+  files, a different internal error each time (a `ParseIntError` inside
+  its own cross-reference-subsection parser).
+- **pdf_oxide** — reads every real-world file thrown at it, including
+  both of the above's casualties, and has a genuine incremental
+  (append-only) save mode. But its typed `WriteAnnotation` builders have
+  no field for a non-standard key like `/NM` — writing needed a small
+  vendored patch exposing `DocumentEditor::set_object`, an object-override
+  mechanism the crate already uses internally for form-field edits (see
+  `vendor/pdf_oxide-0.3.78`, "DAAG PATCH" comments, on the branch below).
+  Verified end-to-end (backfill → reload → confirm `/NM` present →
+  backfill again → confirm no reassignment) on multiple real annotated
+  PDFs.
+
+**Current state**: a working pdf_oxide-based implementation lives on the
+unmerged branch `annotation-nm-backfill-pdf-oxide` (one commit, off
+v1.6.0) — not on master, not shipped, not pushed.
+
+**Next step**: try doing the backfill in the *frontend* instead, with
+**pdf-lib** (not jsPDF — that's a from-scratch PDF creation library with
+no ability to load an existing PDF at all, not a candidate here). pdf-lib
+supports setting an arbitrary dictionary key as a normal, publicly
+documented operation (`dict.set(PDFName.of('NM'), PDFString.of(...))`) —
+no vendored patch needed, unlike pdf_oxide. It's also a better fit for
+this project's own stated architecture ("all real logic is in the
+frontend," Rust kept thin for things the frontend genuinely can't do —
+none of which apply to parsing/rewriting PDF bytes). Two open questions
+before committing to it, both need testing against real files rather than
+assumption: whether pdf-lib's `save()` round-trips the same problem files
+that broke lopdf and pdf-rs, and whether it does a clean full flatten (no
+leftover `/Prev`) or something else. The real-world PDF fixtures used to
+test the libraries above aren't in the repo (gitignored —
+`src-tauri/test-fixtures/`, since some contained real student data) —
+regenerate equivalents by autosaving a couple of comments onto any PDF,
+closing, reopening, and saving again (the second save is what actually
+exercises the failure modes above).
+
 ## Conventions
 - Debounce/timing constants live at the top of `src/main.js`
   (`AUTOSAVE_DEBOUNCE_MS`, `AUTOSAVE_MAX_WAIT_MS`) — tune there, not
