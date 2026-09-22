@@ -1068,13 +1068,34 @@ fixtures that broke lopdf/pdf-rs
 **Current state**: implemented directly in `src/main.js` —
 `ensureAnnotationIds()` (mirrors `ensure_annotation_ids`'s exact
 semantics: skip Link/Popup/Widget, skip annotations that already carry
-`/NM`, else set `/NM` to `crypto.randomUUID()`) is called from
-`saveNow()` on the bytes `pdfDocument.saveDocument()` produces, before
-they're written to `tmpPath` — same best-effort/log-and-skip contract as
-the pdf_oxide version. `pdf-lib` is now a normal `package.json`
-dependency. Manually smoke-tested live in the running Tauri app against a
-couple of real PDFs (Open → annotate → Save → reopen) — no errors. Still
-**not yet committed** (sitting as uncommitted changes on top of the
+`/NM`, else set `/NM` to `crypto.randomUUID()`) is called (via
+`bakeCurrentDocumentBytes()`) on the bytes `pdfDocument.saveDocument()`
+produces, before they're written to `tmpPath` — same best-effort/
+log-and-skip contract as the pdf_oxide version. `pdf-lib` is now a normal
+`package.json` dependency.
+
+**Was silently broken from the start by a cross-realm `instanceof`
+mismatch — found only once DevTools happened to be open during an
+unrelated lock-detection repro.** `pdfDocument.saveDocument()` executes
+inside the pdf.js iframe and hands back a `Uint8Array` built from *that
+window's* `Uint8Array` constructor. `PDFDocument.load()` in pdf-lib (the
+parent document's realm) type-checks its input with `instanceof
+Uint8Array`, which fails across that boundary even though the bytes
+are perfectly valid — every call threw pdf-lib's own generic `TypeError`
+("... but was actually of type `NaN`", pdf-lib's validator's label for
+"didn't match any known type"), caught by `ensureAnnotationIds`'s
+best-effort try/catch and only `console.error`'d, never toasted. So every
+save since this was written quietly fell back to "saving without it," and
+the earlier "no errors" smoke test above only checked that saves
+succeeded and files reopened cleanly — it never opened DevTools console,
+where the failure was logging on every single save. Fixed by rewrapping
+`await app.pdfDocument.saveDocument()` in a same-realm `new
+Uint8Array(...)` inside `bakeCurrentDocumentBytes()` before it goes
+anywhere else in the parent document. **Re-verify this is actually fixed
+with a live save + DevTools console check** — not yet done since the fix
+landed.
+
+Still **not yet committed** (sitting as uncommitted changes on top of the
 pdf_oxide-investigation commit) — open decision is whether this
 supersedes the pdf_oxide branch outright (no vendored Rust patch, matches
 the "logic lives in the frontend" architecture) or the two approaches are
@@ -1085,6 +1106,265 @@ aren't in the repo (gitignored — `src-tauri/test-fixtures/`, since some
 contained real student data) — regenerate equivalents by autosaving a
 couple of comments onto any PDF, closing, reopening, and saving again
 (the second save is what actually exercises the failure modes above).
+
+**External change detection (step 1 of the merge, implemented)**: before
+the actual merge can exist, the app needs to notice when a second
+device/session has saved its own edits into the same synced file since
+this session last touched it. Polling, not `@tauri-apps/plugin-fs`'s own
+`watch`/`watchImmediate` (a native filesystem watcher) — cloud-sync
+clients (OneDrive Files-on-Demand, Dropbox smart sync, Google Drive's
+virtual placeholders) are known to be unreliable with native watch APIs
+specifically, which is exactly the scenario this targets, not an edge
+case for it. `checkForExternalChange()` in `src/main.js` polls every
+`EXTERNAL_CHANGE_POLL_MS` (30s — a detection-latency knob, not a
+data-safety one, since nothing is ever actually lost regardless of how
+late the detection lands, by construction of the redirect design below.
+Deliberately not on `AUTOSAVE_DEBOUNCE_MS`'s 4s scale — the feature this
+serves is explicitly async collaboration, reviewers syncing via
+Drive/OneDrive on their own schedule, not live co-editing, so there's no
+real expectation of sub-minute notice, and every tick reads the whole
+file across the IPC boundary, which is the actually expensive part):
+reads the file (needed either way — to hash when size alone isn't
+conclusive, and to have the bytes ready if it turns out to be a real
+change — so there's no separate stat() pass first), comparing size
+against the expected baseline and falling back to a SHA-256 hash only
+when size alone isn't conclusive (same-length external edits are rare
+but real). Keeps reading and comparing even once a redirect (below) is
+already active — a full short-circuit there would mean a missing file
+that later reappears, or a lock that clears, is never noticed again until
+the document is closed and reopened, which would break exactly the
+delete-restore and lock-release cases this whole mechanism needs to cover
+eventually. It doesn't react to a *further* external change differently
+while already redirected (nothing here can act on that yet — merge is
+separate work), but it does let a redirect resolve itself in the one case
+that needs no merge at all: canonical turning out to be back at exactly
+what this session already expected, meaning the disruption was a false
+alarm with nothing to reconcile.
+
+**Content matching isn't itself proof of that for `file-locked`, though**
+— a file merely opened elsewhere for viewing never changes its bytes at
+all, so an earlier version of this logic (clear `redirect`, toast "back to
+normal," rely on the next autosave tick to actually test writability)
+declared a lock resolved on literally the very next poll tick after it
+started, then flipped straight back to a failure toast moments later once
+the real write it re-armed was attempted and failed — found via a live
+Acrobat repro. Fixed: on a content match, the poll now attempts the real
+write to canonical **immediately, right there** (tentatively clearing
+`redirect` first, restored if `saveNow` bails without ever attempting a
+write — e.g. another save already in flight — since only an actual
+attempt is allowed to resolve or re-set it) and only announces success
+once that write actually lands. This still doubles as the lock-retry
+path exactly as before — a write that's still genuinely locked fails the
+same way it always did, and `saveNow`'s own catch re-sets `redirect` (see
+below) — it just no longer claims success before earning it. A real,
+*different* result while redirected doesn't get auto-resolved, but does
+get relabelled to `external-change` if it wasn't already, so whatever
+eventually reconciles it has an accurate signal to work from.
+
+**Resolution model: redirect, don't overwrite-then-backup.** An earlier
+version of this backed up the external content *then* overwrote
+`currentPath` with this session's own bytes shortly after (via
+`markDirty()` arming the normal autosave debounce) — but two devices
+both open and active at once could ping-pong: each side's own resave
+would trigger the other's detection, which would resave again, and so
+on. The current design instead redirects every subsequent write to a
+per-process **orphan file** and never touches `currentPath` at all until
+something explicitly reconciles the two — so there's nothing to fight
+over, and nothing to lose either: `currentPath` still holds the external
+content, completely untouched, which is itself a preservation of it with
+no separate backup step needed.
+
+Four conditions set the same `redirect` state
+(`{ kind: 'external-change' | 'file-missing' | 'file-locked' | 'save-failed', name }`),
+one variable rather than several, since they all need identical handling
+from here on:
+- **External change** (`handleExternalChange`, called from
+  `checkForExternalChange` on a mismatch).
+- **File missing** — moved/renamed/deleted out from under the open
+  document, not just changed. Detected the same poll pass, via
+  `readIfExists`/`FileMissingError` (the same helper `openPath` already
+  uses) rather than a bare `readFile` — distinguishes "genuinely gone"
+  from some other transient read failure (permission denied, a
+  cloud-sync placeholder mid-hydration), which isn't reported to the
+  user at all, just logged and skipped.
+- **File locked** / **Save failed** — any failure writing to `currentPath`
+  sets one of these two, distinguished only by whether the error text
+  looks like a Windows sharing/lock violation (`looksLikeFileLock()`:
+  matches "os error 32/33/5", "being used by another process", "sharing
+  violation", "access is denied", case-insensitive — a best-effort
+  heuristic, so this is presentation only, not a gate on whether to
+  protect the save). Verified against a real repro: opening the file in
+  Acrobat Reader makes our write-then-rename fail with plain
+  `ERROR_ACCESS_DENIED` ("os error 5"), not `ERROR_SHARING_VIOLATION` as
+  first guessed — Acrobat apparently opens the file without
+  `FILE_SHARE_DELETE`, which is enough to block a rename-over-existing-file
+  without producing a sharing-violation error specifically. The
+  32/33/sharing-violation patterns are kept alongside it for whatever app
+  *does* produce that shape instead.
+  **Every other save failure used to just retry silently with nothing on
+  disk to show for it in the meantime** — a real data-loss gap for
+  whatever `looksLikeFileLock()` didn't happen to recognize, exactly what
+  the "os error 5" case above turned out to be before it was added to the
+  heuristic. Fixed: any write failure to `currentPath` now sets `redirect`
+  (`'file-locked'` when the heuristic matches, `'save-failed'` — same
+  handling, more honest wording — when it doesn't), so it always falls
+  back to the orphan file rather than depending on the heuristic ever
+  being complete. The one place this intentionally does *not* apply: a
+  failure writing to the *orphan itself* (i.e. `redirect` was already
+  set) still just retries with no further fallback — see "Explicitly not
+  built yet" below.
+
+Whichever kind sets it, the same two things happen: `markDirty()` (so
+closing the document without having made any local edit since detection
+still saves — `closeCurrentPdf` only force-saves `if (dirty)`, and
+without this, closing would silently leave the redirect unresolved and
+this session's state unsaved anywhere) and a toast via
+`announceRedirect()`, worded per `kind`. Once `redirect` is set,
+`saveNow()` (both the normal debounce and a manual/force save) targets a
+per-process pending file instead of `currentPath`:
+`<stem>.pending-<owner>-<sessionId>.daagbak`, where `sessionId` is a
+short `crypto.randomUUID()` generated once at module load (reused for
+every redirected save this process makes, across however many documents
+get opened — *not* regenerated per save, which would spawn a new file
+every autosave tick) and `owner` is `get_os_username()` (the existing
+Tauri command). Both pieces of the name matter for disambiguation: the
+random id covers two windows on one machine, the username covers two
+different machines sharing a login — e.g. the same person's desktop and
+laptop, which collide on username but not on session id, and vice versa
+for two windows.
+
+**Why `.daagbak`, not `.pdf`.** Every place in the app that recognizes a
+PDF checks `.endsWith(".pdf")` — `refreshFolderNavigation`'s Prev/Next
+listing, `pickAndOpenPdf`'s native file-picker filter,
+`attachDragDropOpen`'s drop-path filter — and `tauri.conf.json`'s
+`fileAssociations` only registers `.pdf` for the OS "Open with"/
+double-click path. A pending or backup file that ends in anything else
+automatically fails all of those, for free, with no new exclusion code
+needed anywhere. Same instinct as the existing `<file>.autosave.tmp`
+staging file, just for a longer-lived artifact — which is also why it
+gets its own extension rather than reusing `.tmp`: that already means
+"transient, safe to ignore" for the staging file, and reusing it for
+something meant to persist until reconciled risks it getting swept up by
+some unrelated cleanup convention.
+
+The baseline (`expectedDiskSize`/`expectedDiskHash`) is only ever set
+from a point that actually knows the true on-disk state at that instant —
+`openPath`'s fresh read, or `saveNow`'s fresh write *when it actually
+wrote to `currentPath`* (skipped while redirected, since canonical wasn't
+touched) — deliberately never from `loadPdfIntoViewer` in general, since
+Undo All's revert calls pass it in-memory bytes that aren't what's on
+disk yet.
+
+**Either warning's first toast is easy to miss if the window wasn't
+focused when it fired** — `showToast` auto-dismisses after a few seconds,
+and the titlebar status dot turning red is a subtle, easy-to-overlook
+signal on its own. A second `getCurrentWindow().onFocusChanged()`
+listener (independent of the one that already drives the titlebar's
+inactive-window look) re-announces the active `redirect`, if any, every
+time the window regains focus. Deliberately a re-announce on focus, not
+a pause-while-unfocused for the poll itself — autosave doesn't check
+window focus either, so it could clobber an undetected external change
+at any time even while the window is in the background, which is exactly
+the case this whole feature exists to catch.
+
+Manually smoke-tested live in the running Tauri app across several
+earlier iterations of this design (including alt-tabbing repeatedly,
+which stacks reminder toasts one per focus-regain — expected, not a
+bug); **not yet re-tested against this redirect revision specifically**.
+
+**Resolving a redirect manually, from the toolbar Save button (implemented,
+`resolveRedirectAndSave`/`onSaveActivated` in `src/main.js`).** Every
+*automatic* save path — the debounce timer, the safety-net interval,
+closing the document, Undo All — keeps silently targeting the orphan for
+as long as `redirect` is set, on purpose: a blocking dialog appearing in
+the middle of any of those would be a bad surprise for something the user
+didn't ask to resolve right now. Only the Save button and its Ctrl+S
+shortcut route through `onSaveActivated`, the one place this app ever
+asks "what should saving actually do right now?" instead of just doing
+it. A small red dot on the Save button (`.has-redirect` in
+`custom-viewer.css`, toggled by the only function allowed to assign
+`redirect` — `setRedirect`) signals that clicking it now opens a dialog
+instead of just saving, since otherwise the very first click after a
+redirect starts would be a surprise.
+
+The dialog (`resolveRedirectDialog` in `index.html`, one dialog with
+content driven by `redirect.kind` rather than three separate ones — same
+shape as Undo All's own confirmation) offers, per kind:
+- **`file-missing`** → "Restore": recreates the file at `currentPath`
+  with this session's current content. Nothing to back up — there's
+  nothing there to lose.
+- **`file-locked`** → "Retry Save": attempts `currentPath` again. If it's
+  still actually locked, the write fails the same way it did the first
+  time, and this click's bytes fall back to the orphan instead — so a
+  retry attempt never loses the edits it was trying to save, it just
+  doesn't resolve the redirect. Also no backup: nothing here indicates
+  the content actually diverged (if it had, the poll's self-heal check
+  above would already have relabelled this `external-change` instead).
+- **`external-change`** → "Merge" (toasts "not available yet" and leaves
+  the dialog open — previews the eventual three-way shape without
+  pretending the capability exists) or "Overwrite": backs up whatever's
+  currently on `currentPath` as `<stem>.external-<timestamp>.daagbak`
+  (this one intentionally *not* using the orphan's session-id naming —
+  it's a one-off snapshot of the *other* version, not this session's own
+  ongoing work, so it doesn't need to disambiguate across processes) and
+  only proceeds to overwrite once that backup succeeds — if the backup
+  itself fails, the save is cancelled rather than risking the one truly
+  unrecoverable outcome this whole design exists to avoid.
+
+All three success paths end the same way: `expectedDiskSize`/`Hash`
+updated, `redirect` cleared, the orphan deleted (`deleteOrphanIfPresent`,
+best-effort — already redundant by that point, so a failure to remove it
+is logged and otherwise ignored), `dirty` cleared.
+
+**Explicitly not built yet — separate work from both the redirect
+mechanism and the manual resolve dialog above**:
+- **A further fallback when writing to the orphan itself fails.** Today
+  that's the actual last line of defense — if it fails too (both
+  `saveNow`'s automatic redirected write and `resolveRedirectAndSave`'s
+  retry-then-orphan-fallback branch), the app just falls back to a plain
+  "Autosave failed" toast and keeps retrying on the normal schedule, with
+  nothing on disk for this attempt. Since the orphan is deliberately a
+  sibling of `currentPath` (same directory, different name), the two
+  tend to fail together — a disconnected drive, a permissions problem on
+  the whole folder, a full disk — so this residual gap is real, not
+  theoretical. A genuine third layer would need to leave that directory
+  entirely (OS temp dir, or a Tauri app-data dir) rather than just
+  reusing the orphan's own naming scheme one level further.
+- **Automatic/mid-session reconciliation.** Right now the *only* way a
+  redirect resolves is the user explicitly clicking Save and choosing an
+  option in the dialog above — nothing detects a conflict and offers to
+  reconcile on its own, and nothing runs on reopening a document that has
+  an orphaned `.daagbak` sitting next to it from a previous session that
+  closed before resolving. Both are still planned trigger points for
+  whatever eventually does real merging.
+- **The merge algorithm itself** — what the dialog's "Merge" button will
+  eventually do instead of toasting. NM-keyed, processed as repeated
+  pairwise merges (canonical + one orphan at a time — order doesn't
+  matter for the safe case, and it's naturally idempotent/resumable if
+  interrupted). Three buckets per `/NM`: unique to one source → auto-merge;
+  identical everywhere → dedupe; differing → genuine conflict, flagged
+  for review, never silently resolved. Deletions are explicitly out of
+  scope for a first pass — telling "deleted" apart from "never existed in
+  that source" needs each orphan to carry a pointer back to its own base
+  snapshot, which nothing persists yet.
+- **A lineage sanity-check before ever trusting NM-based merge at all**
+  (page count, some overlapping existing NMs) — protects against the case
+  where a "revision" is actually a wholesale fresh export from the source
+  document (LaTeX/Word), sharing no object lineage with the old file at
+  all; blindly merging in that case could anchor an old annotation to a
+  nonsensical position in a structurally unrelated document.
+- **Loop-termination by content, not bytes**, for whatever eventually
+  runs *automatic* merge rounds (the manual dialog above doesn't loop, so
+  this doesn't apply to it). Verified today's pipeline (pdf-lib's
+  `save()` and pdf.js's own annotation timestamps) happens to be
+  deterministic on a genuine no-op resave — `gen2.pdf`/`gen3.pdf` for
+  every fixture in the pdf-lib investigation above are byte-identical,
+  and pdf.js only stamps `/M`/`CreationDate` once, at actual edit time,
+  not on every `saveDocument()` call — but that's not safe to depend on
+  across future library upgrades. Whether an automatic round actually
+  produced anything new should be decided by NM-keyed content equality,
+  not by comparing raw bytes/hashes, so convergence is structural rather
+  than incidental.
 
 ## Conventions
 - Debounce/timing constants live at the top of `src/main.js`

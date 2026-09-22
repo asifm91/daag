@@ -55,6 +55,25 @@
   pointer-events: none;
 }
 
+/* Small dot when this session's autosave is redirected to a pending file
+   instead of the original (see setRedirect()/onSaveActivated() in
+   main.js) — clicking Save now opens a resolve dialog instead of doing a
+   plain save. Same badge shape as the Settings gear's update dot in
+   index.html, just against pdf.js's own toolbar background variable
+   (light-dark aware) instead of the titlebar's. */
+#customSaveButton { position: relative; }
+#customSaveButton.has-redirect::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e06c6c;
+  box-shadow: 0 0 0 1.5px var(--toolbar-bg-color);
+}
+
 /* A counter-clockwise arrow — the standard "undo" glyph — built from an
    arrowhead (polyline) plus a partial circular arc (path), both stroked
    rather than filled like the icons above. mask-image only cares about

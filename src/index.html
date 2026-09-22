@@ -311,6 +311,21 @@
       #undoAllDialogConfirmButton { background: #6b2b2b; border-color: #a33d3d; }
       #undoAllDialogConfirmButton:hover { background: #7e3232; }
 
+      /* ---- Resolve a redirected save: shown from the (repurposed) toolbar
+         Save button while autosave is redirected to a pending file — see
+         setRedirect()/onSaveActivated() in main.js. Same shape as Undo
+         All's dialog; content is filled in per redirect.kind rather than
+         needing three separate dialogs. */
+      #resolveRedirectDialog { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 0; width: min(420px, 90vw); }
+      #resolveRedirectDialog::backdrop { background: var(--overlay); }
+      #resolveRedirectDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+      #resolveRedirectDialogHeader h2 { font-size: 14px; font-weight: 500; margin: 0; }
+      #resolveRedirectDialogBody { padding: 16px; font-size: 13px; color: var(--fg); line-height: 1.5; }
+      #resolveRedirectDialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+      #resolveRedirectDialogFooter button { padding: 6px 14px; font-size: 13px; }
+      #resolveRedirectDialogConfirmButton { background: #6b2b2b; border-color: #a33d3d; }
+      #resolveRedirectDialogConfirmButton:hover { background: #7e3232; }
+
       /* ---- AI comment summary result: opened from the toolbar's Summarize Comments button ---- */
       #summaryDialog { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 0; width: min(640px, 92vw); }
       #summaryDialog::backdrop { background: var(--overlay); }
@@ -730,6 +745,21 @@
       <div id="undoAllDialogFooter">
         <button id="undoAllDialogCancelButton" type="button">Cancel</button>
         <button id="undoAllDialogConfirmButton" type="button">Undo All</button>
+      </div>
+    </dialog>
+
+    <dialog id="resolveRedirectDialog">
+      <div id="resolveRedirectDialogHeader">
+        <h2 id="resolveRedirectDialogTitle">Resolve pending save</h2>
+        <button id="resolveRedirectDialogCloseButton" type="button">Close</button>
+      </div>
+      <div id="resolveRedirectDialogBody">
+        <p id="resolveRedirectDialogMessage"></p>
+      </div>
+      <div id="resolveRedirectDialogFooter">
+        <button id="resolveRedirectDialogCancelButton" type="button">Cancel</button>
+        <button id="resolveRedirectDialogMergeButton" type="button" class="hidden">Merge</button>
+        <button id="resolveRedirectDialogConfirmButton" type="button">Overwrite</button>
       </div>
     </dialog>
 
