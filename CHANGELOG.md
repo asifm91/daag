@@ -9,6 +9,37 @@ stays in this file but is left off the website.
 
 ## [Unreleased]
 
+### Added
+
+- **Protection when the open file changes underneath you** — if the PDF is
+  changed by another device or program (e.g. a synced copy edited
+  elsewhere), moved, renamed or deleted, or can't be saved because another
+  program has it open, Daag stops writing to it and saves your edits to a
+  separate `.daagbak` file next to it instead, so neither version is lost.
+  A notice explains what happened (repeated when you come back to the
+  window), and a dot on the Save button shows that clicking it will offer a
+  fix: restore a missing file, retry a locked one, or overwrite a changed
+  one (after keeping the other version as a backup).
+- **Save As… when the file can't be saved in place** — offered alongside
+  each of the fixes above, and as the only option when even the `.daagbak`
+  copy can't be written (e.g. a removed drive or unavailable network
+  folder). The document then continues from the new location.
+- **`.daagbak` files explained** — a new row in Settings → General and a
+  section in the online guide describe what these files are and when
+  they're safe to delete.
+
+### Changed
+
+- **Annotations get a stable unique ID when saved** — groundwork for
+  merging annotations from different copies of the same file in a future
+  release. No visible change.
+
+### Fixed
+
+- **Stray `.autosave.tmp` files** — a save that failed partway through
+  could leave a `<file>.pdf.autosave.tmp` next to the PDF indefinitely.
+  It's now cleaned up.
+
 ## [1.6.0] — 2026-09-17
 
 ### Added
