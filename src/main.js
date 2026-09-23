@@ -3185,6 +3185,10 @@ async function ensureAnnotationIds(bytes) {
 // pending file back into currentPath (and deleting it afterward) is
 // separate, not-yet-built work; this only detects and redirects.
 const EXTERNAL_CHANGE_POLL_MS = 30000; // see CLAUDE.md — a detection-latency knob, not a data-safety one; every tick reads the whole file across the IPC boundary, deliberately not on AUTOSAVE_DEBOUNCE_MS's scale
+// A blur→focus flip only counts as "the user came back to the window" (and
+// re-announces an active redirect) if the window was unfocused at least
+// this long — a titlebar click produces a real but millisecond-short one.
+const REDIRECT_REMINDER_MIN_BLUR_MS = 1000;
 
 // Size/hash of what this app itself last read from or wrote to currentPath
 // — i.e. what we expect is still on disk. Only ever set from a point that
@@ -3297,18 +3301,33 @@ function announceRedirect({ reminder = false } = {}) {
 // spurious extra one on its own, no real focus change at all). Tracking
 // "was the window already focused" and only reacting when that flips
 // false→true absorbs both: a duplicate `true` event lands as true→true
-// and is ignored, same as a same-focus titlebar click.
+// and is ignored.
+//
+// Edge-triggering alone doesn't cover a titlebar click, though: mousedown
+// on the drag region hands off to the native window-move loop
+// (startDragging), which genuinely blurs the window and refocuses it a few
+// ms later — a real false→true flip, indistinguishable by focus state
+// alone. So the blur also has to have lasted REDIRECT_REMINDER_MIN_BLUR_MS;
+// actually switching away and back takes far longer than that.
 let wasWindowFocused = true;
+let windowBlurredAt = null;
 getCurrentWindow()
   .isFocused()
   .then((focused) => {
     wasWindowFocused = focused;
+    if (!focused) windowBlurredAt = Date.now();
   })
   .catch(() => {}); // plain vite dev — keep the optimistic default above
 getCurrentWindow().onFocusChanged(({ payload: focused }) => {
   const cameIntoFocus = focused && !wasWindowFocused;
+  if (!focused && wasWindowFocused) windowBlurredAt = Date.now();
   wasWindowFocused = focused;
-  if (cameIntoFocus && redirect) announceRedirect({ reminder: true });
+  if (!cameIntoFocus) return;
+  const blurredForMs = windowBlurredAt === null ? Infinity : Date.now() - windowBlurredAt;
+  windowBlurredAt = null;
+  if (redirect && blurredForMs >= REDIRECT_REMINDER_MIN_BLUR_MS) {
+    announceRedirect({ reminder: true });
+  }
 });
 
 function stopExternalChangePolling() {

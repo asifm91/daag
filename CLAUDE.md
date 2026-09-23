@@ -1298,8 +1298,12 @@ drag-region titlebar while the window was *already* focused produced a
 spurious one on its own, with no real focus change at all (plausibly
 WebView2 re-asserting activation on a drag-region mousedown). Fixed by
 tracking `wasWindowFocused` and only reacting when it flips false→true —
-a duplicate `true` event or a same-focus click both land as true→true and
-are ignored.
+a duplicate `true` event lands as true→true and is ignored. **That alone
+did not fix the titlebar click**: a drag-region mousedown hands off to the
+native window-move loop, which *genuinely* blurs and refocuses the window
+a few ms apart — a real false→true flip. So the flip also has to follow a
+blur lasting at least `REDIRECT_REMINDER_MIN_BLUR_MS` (1s, tracked via
+`windowBlurredAt`); a real switch-away-and-back is always longer.
 
 Manually smoke-tested live in the running Tauri app across several
 iterations of this design, most recently confirming the focus-toast fix
