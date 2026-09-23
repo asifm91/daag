@@ -625,6 +625,25 @@
             </p>
           </div>
 
+          <div id="daagbakRow">
+            <label>Pending-save backup files</label>
+            <p class="settings-help">
+              When দাগ can't save into the original file — it's locked by
+              another app, moved, or a synced folder is briefly
+              unavailable — your edits go into a
+              <code>&lt;filename&gt;.daagbak</code> file next to it
+              instead. দাগ tells you when this happens and offers to
+              resolve it from the Save button; once you're sure
+              everything made it back into the real PDF, these are safe
+              to delete. They're actual PDF files under a different
+              extension, so any PDF viewer can open one directly to check
+              its contents first if you want to be sure. A merge feature
+              is under development to resolve these automatically in a
+              future release.
+              <a id="daagbakDocLink" href="#">Learn more</a>
+            </p>
+          </div>
+
           <div id="longPathRow" hidden>
             <label>Windows long path support</label>
             <p id="longPathStatus" class="settings-status">Checking…</p>
@@ -759,6 +778,7 @@
       <div id="resolveRedirectDialogFooter">
         <button id="resolveRedirectDialogCancelButton" type="button">Cancel</button>
         <button id="resolveRedirectDialogMergeButton" type="button" class="hidden">Merge</button>
+        <button id="resolveRedirectDialogSaveAsButton" type="button">Save As…</button>
         <button id="resolveRedirectDialogConfirmButton" type="button">Overwrite</button>
       </div>
     </dialog>

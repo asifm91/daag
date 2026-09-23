@@ -1161,6 +1161,28 @@ below) — it just no longer claims success before earning it. A real,
 get relabelled to `external-change` if it wasn't already, so whatever
 eventually reconciles it has an accurate signal to work from.
 
+**"Only announces success once that write actually lands" needed a second
+fix once `saveNow` itself learned to fall back to the orphan
+(`writeFileAtomicWithFallback` — see Conventions below).** The check here
+used to read `saveNow`'s *return value* (`saved`) to decide "did it
+actually land at canonical" — that stopped being true the moment `saveNow`
+started returning the written bytes even when it fell back to the orphan
+internally, not just when it landed at `currentPath`. Net effect, found
+live: a still-locked file produced the "still locked" toast (from
+`saveNow`'s own fallback announcing itself) immediately followed by a
+*false* "back to normal" toast from this self-heal code misreading that
+truthy return as full success — and worse, it then called
+`deleteOrphanIfPresent`, deleting the orphan copy `saveNow`'s fallback had
+just written this session's latest edits to, moments after writing it.
+Fixed: check `redirect` itself after the call, not `saved` — `saveNow`
+already re-sets `redirect` (and announces) itself whenever a write didn't
+land at `currentPath`, fallback or outright failure alike, so `redirect`
+staying `null` is the only signal that actually means "resolved." `saved`
+is only consulted *within* that `redirect === null` case, to tell
+"genuinely wrote to currentPath" apart from "bailed without attempting
+anything at all" (an early guard clause, e.g. another save already in
+flight) — only the latter restores `previousRedirect`.
+
 **Resolution model: redirect, don't overwrite-then-backup.** An earlier
 version of this backed up the external content *then* overwrote
 `currentPath` with this session's own bytes shortly after (via
@@ -1267,10 +1289,21 @@ window focus either, so it could clobber an undetected external change
 at any time even while the window is in the background, which is exactly
 the case this whole feature exists to catch.
 
+**Edge-triggered on an actual blur→focus transition, not on every
+`focused: true` event.** An earlier version reacted to every event the
+listener received, on the assumption alt-tabbing back would fire exactly
+one — live testing found otherwise: a genuine focus-regain sometimes
+produced *two* reminder toasts back to back, and clicking anywhere on the
+drag-region titlebar while the window was *already* focused produced a
+spurious one on its own, with no real focus change at all (plausibly
+WebView2 re-asserting activation on a drag-region mousedown). Fixed by
+tracking `wasWindowFocused` and only reacting when it flips false→true —
+a duplicate `true` event or a same-focus click both land as true→true and
+are ignored.
+
 Manually smoke-tested live in the running Tauri app across several
-earlier iterations of this design (including alt-tabbing repeatedly,
-which stacks reminder toasts one per focus-regain — expected, not a
-bug); **not yet re-tested against this redirect revision specifically**.
+iterations of this design, most recently confirming the focus-toast fix
+above and the redirect model as it stands today.
 
 **Resolving a redirect manually, from the toolbar Save button (implemented,
 `resolveRedirectAndSave`/`onSaveActivated` in `src/main.js`).** Every
@@ -1288,48 +1321,96 @@ instead of just saving, since otherwise the very first click after a
 redirect starts would be a surprise.
 
 The dialog (`resolveRedirectDialog` in `index.html`, one dialog with
-content driven by `redirect.kind` rather than three separate ones — same
+content driven by `redirect.kind` rather than several separate ones — same
 shape as Undo All's own confirmation) offers, per kind:
 - **`file-missing`** → "Restore": recreates the file at `currentPath`
   with this session's current content. Nothing to back up — there's
   nothing there to lose.
-- **`file-locked`** → "Retry Save": attempts `currentPath` again. If it's
-  still actually locked, the write fails the same way it did the first
-  time, and this click's bytes fall back to the orphan instead — so a
-  retry attempt never loses the edits it was trying to save, it just
-  doesn't resolve the redirect. Also no backup: nothing here indicates
-  the content actually diverged (if it had, the poll's self-heal check
-  above would already have relabelled this `external-change` instead).
+- **`file-locked`** / **`save-failed`** → "Retry Save": attempts
+  `currentPath` again (same wording either way — the two kinds only
+  differ in whether `looksLikeFileLock()` recognized the error text). If
+  it's still actually locked/failing, the write fails the same way it did
+  the first time, and this click's bytes fall back to the orphan instead
+  — so a retry attempt never loses the edits it was trying to save, it
+  just doesn't resolve the redirect. Also no backup: nothing here
+  indicates the content actually diverged (if it had, the poll's
+  self-heal check above would already have relabelled this
+  `external-change` instead).
 - **`external-change`** → "Merge" (toasts "not available yet" and leaves
   the dialog open — previews the eventual three-way shape without
-  pretending the capability exists) or "Overwrite": backs up whatever's
-  currently on `currentPath` as `<stem>.external-<timestamp>.daagbak`
-  (this one intentionally *not* using the orphan's session-id naming —
-  it's a one-off snapshot of the *other* version, not this session's own
-  ongoing work, so it doesn't need to disambiguate across processes) and
-  only proceeds to overwrite once that backup succeeds — if the backup
-  itself fails, the save is cancelled rather than risking the one truly
-  unrecoverable outcome this whole design exists to avoid.
+  pretending the capability exists) or "Overwrite": moves whatever's
+  currently on `currentPath` aside — a plain `rename`, not a read-then-
+  write, since that content isn't being modified at all, only relocated,
+  and reading a potentially large file fully into memory just to write
+  those same bytes straight back out unchanged a moment later has no
+  upside — to `<stem>.external-<timestamp>.daagbak` (this one
+  intentionally *not* using the orphan's session-id naming — it's a
+  one-off snapshot of the *other* version, not this session's own ongoing
+  work, so it doesn't need to disambiguate across processes), and only
+  proceeds to overwrite once that rename succeeds — if it fails, the save
+  is cancelled rather than risking the one truly unrecoverable outcome
+  this whole design exists to avoid. One narrow trade from renaming
+  first: `writeFileAtomic`'s own atomicity guarantee (the target never
+  goes empty; a failed rename leaves it exactly as it was) only covers
+  `currentPath` being *written*, not this earlier move — once the rename
+  to the backup succeeds, `currentPath` is genuinely empty until the
+  follow-up write of this session's bytes lands. If *that* write then
+  fails (already an unexpected case — see below), `currentPath` ends up
+  missing rather than holding the stale-but-valid external content the
+  read-then-write version would have left behind. No content is actually
+  lost either way — the external version is safely at the backup path,
+  this session's edits are still recoverable via `save-unavailable`'s
+  Save As — so this was judged an acceptable trade for how rare the
+  compound failure already is, not an oversight.
+- **`save-unavailable`** — see below; its only action is Save As.
 
-All three success paths end the same way: `expectedDiskSize`/`Hash`
+All four success paths above end the same way: `expectedDiskSize`/`Hash`
 updated, `redirect` cleared, the orphan deleted (`deleteOrphanIfPresent`,
 best-effort — already redundant by that point, so a failure to remove it
 is logged and otherwise ignored), `dirty` cleared.
 
-**Explicitly not built yet — separate work from both the redirect
-mechanism and the manual resolve dialog above**:
-- **A further fallback when writing to the orphan itself fails.** Today
-  that's the actual last line of defense — if it fails too (both
-  `saveNow`'s automatic redirected write and `resolveRedirectAndSave`'s
-  retry-then-orphan-fallback branch), the app just falls back to a plain
-  "Autosave failed" toast and keeps retrying on the normal schedule, with
-  nothing on disk for this attempt. Since the orphan is deliberately a
-  sibling of `currentPath` (same directory, different name), the two
-  tend to fail together — a disconnected drive, a permissions problem on
-  the whole folder, a full disk — so this residual gap is real, not
-  theoretical. A genuine third layer would need to leave that directory
-  entirely (OS temp dir, or a Tauri app-data dir) rather than just
-  reusing the orphan's own naming scheme one level further.
+**A fourth redirect kind, `save-unavailable`, and a "Save As…" action
+(`resolveWithSaveAs`), for when even the orphan isn't a safe bet.**
+`file-locked`/`save-failed`/`file-missing` all still have a disk-backed
+fallback (the orphan) if their own primary action fails again — but the
+orphan is deliberately a sibling of `currentPath` (same directory,
+different name), so a failure severe enough to break *that* too (a
+removed drive, an unmounted synced folder, a dead network share) usually
+means the whole directory is the problem, not just one file in it.
+Retrying anything in that same directory again would be no better
+informed than it was a moment ago. Two places transition into this kind
+once that happens: `saveNow`'s own catch, when a write that was already
+targeting the orphan (i.e. `redirect` was already set) fails too; and
+`resolveRedirectAndSave`'s retry-then-orphan-fallback branch, when the
+orphan fallback write itself throws. Its outer catch also folds any other
+unexpected failure into the same kind (e.g. `external-change`'s own
+overwrite failing *after* its backup already succeeded) rather than
+leaving a bespoke unhandled case.
+
+**Save As is also offered as a secondary action alongside every other
+kind's own primary action**, not only `save-unavailable`'s — a lock is
+per-*path*, not per-folder, so saving under a new filename can plausibly
+succeed immediately without waiting for the other app to let go; a
+"missing" file's whole folder might be gone too, not just the file. It's
+promoted to the *only* action for `save-unavailable`, where nothing else
+is left to try.
+
+Mechanically, `resolveWithSaveAs` doesn't try to repair the
+currentPath/orphan relationship at all — it treats a chosen destination
+as the document moving there, the same as opening a file, not a one-off
+export the session goes on ignoring. Native `save()` dialog (already used
+for "Save Copy As"/"Export Comments As"/"Save Summary As", same
+write-then-rename pattern as every other write in this app) → on success,
+`currentPath` itself is reassigned to the new path, `expectedDiskSize`/
+`Hash` recomputed, `redirect` cleared, recent-files/window-title/Prev-Next
+folder navigation all refreshed exactly as a fresh Open would (the old
+folder's sibling-file listing no longer applies once the document has
+moved), and the *old* orphan is best-effort deleted. Cancelling the native
+picker leaves everything untouched — still redirected, as before the
+click.
+
+**Explicitly not built yet — separate work from the redirect mechanism
+and the manual resolve dialog above**:
 - **Automatic/mid-session reconciliation.** Right now the *only* way a
   redirect resolves is the user explicitly clicking Save and choosing an
   option in the dialog above — nothing detects a conflict and offers to
@@ -1371,7 +1452,42 @@ mechanism and the manual resolve dialog above**:
   (`AUTOSAVE_DEBOUNCE_MS`, `AUTOSAVE_MAX_WAIT_MS`) — tune there, not
   inline.
 - Write-then-rename is the pattern for any future feature that writes to
-  the original PDF path — never write directly over it.
+  the original PDF path — never write directly over it. Use the shared
+  `writeFileAtomic(path, bytes)` (`src/main.js`) rather than writing the
+  `<path>.autosave.tmp` + rename pair inline — every write-then-rename
+  call site used to repeat that pair by hand, and a failed rename (the
+  exact mechanism that first detects a locked file: the tmp write
+  succeeds, replacing the locked target doesn't) left its tmp file
+  orphaned forever, since nothing else ever targeted `*.autosave.tmp` for
+  cleanup. Found live during lock testing — a stale `<file>.pdf.autosave.tmp`
+  sat next to the file for as long as the session stayed redirected to the
+  `.daagbak` orphan. `writeFileAtomic` best-effort removes the tmp file on
+  a failed rename before the original error propagates, closing the leak
+  at every call site (`saveNow`, `resolveRedirectAndSave`'s three writes,
+  `resolveWithSaveAs`) at once.
+- When a failed write to some primary path has a known fallback (the
+  redirect model's currentPath → orphan relationship), use
+  `writeFileAtomicWithFallback(primaryPath, getFallbackPath, bytes)`
+  instead of catching the primary failure, discarding its tmp file, and
+  writing fresh a second time — that shape has a real gap between "primary
+  failed" and "a later attempt writes the fallback," during which this
+  session's edits exist only in memory, in the exact scenario (a write
+  already just failed) where that's least welcome. It redirects the
+  *same* already-written tmp file straight to the fallback path instead,
+  so the bytes stay continuously on disk with no such gap and no second
+  write. `getFallbackPath` is a function, not an already-resolved path —
+  deriving the orphan path costs a couple of IPC round trips, and the
+  overwhelming majority of calls succeed at the primary on the first try,
+  so it's only paid when a fallback is actually needed. Returns `{ path,
+  primaryError }` — `primaryError` is set even on overall success,
+  whenever that success happened at the fallback, and is what the caller
+  should classify/log; only thrown if *both* the primary and the fallback
+  fail. Used by `saveNow` (currentPath → orphan) and
+  `resolveRedirectAndSave`'s file-missing/file-locked/save-failed retry
+  path (same pair) — not by `external-change`'s overwrite (no fallback is
+  attempted there on purpose; see its own comment) or by any one-shot
+  write with nowhere else to go (`resolveWithSaveAs`, the external-change
+  backup write).
 - Never hand-edit `src/pdfjs/web/**` — it's dropped in wholesale on a
   pdf.js upgrade. Any customization (buttons, styling, behavior patches)
   is injected from `main.js`/`custom-viewer.css` instead.

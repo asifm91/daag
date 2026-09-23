@@ -112,6 +112,7 @@ const OLLAMA_DOC_URL = "https://ollama.com/download";
 // Guide page (GitHub Pages), source repo, and issue tracker — linked from
 // the Settings "About" tab.
 const GUIDE_URL = "https://asifm91.github.io/daag/guide.html";
+const DAAGBAK_DOC_URL = `${GUIDE_URL}#daagbak-files`;
 const REPO_URL = "https://github.com/asifm91/daag";
 const ISSUES_URL = "https://github.com/asifm91/daag/issues";
 // Auto-update. The updater plugin (see src-tauri) points at a GitHub
@@ -170,6 +171,7 @@ const longPathRowEl = document.getElementById("longPathRow");
 const longPathStatusEl = document.getElementById("longPathStatus");
 const enableLongPathButtonEl = document.getElementById("enableLongPathButton");
 const longPathDocLinkEl = document.getElementById("longPathDocLink");
+const daagbakDocLinkEl = document.getElementById("daagbakDocLink");
 const updateStatusEl = document.getElementById("updateStatus");
 const updateRowChangelogLinkEl = document.getElementById("updateRowChangelogLink");
 const checkUpdateButtonEl = document.getElementById("checkUpdateButton");
@@ -217,6 +219,7 @@ const resolveRedirectDialogEl = document.getElementById("resolveRedirectDialog")
 const resolveRedirectDialogCloseButtonEl = document.getElementById("resolveRedirectDialogCloseButton");
 const resolveRedirectDialogCancelButtonEl = document.getElementById("resolveRedirectDialogCancelButton");
 const resolveRedirectDialogMergeButtonEl = document.getElementById("resolveRedirectDialogMergeButton");
+const resolveRedirectDialogSaveAsButtonEl = document.getElementById("resolveRedirectDialogSaveAsButton");
 const resolveRedirectDialogConfirmButtonEl = document.getElementById("resolveRedirectDialogConfirmButton");
 const resolveRedirectDialogTitleEl = document.getElementById("resolveRedirectDialogTitle");
 const resolveRedirectDialogMessageEl = document.getElementById("resolveRedirectDialogMessage");
@@ -682,6 +685,13 @@ longPathDocLinkEl.addEventListener("click", (event) => {
   event.preventDefault();
   invoke("open_external", { url: LONG_PATH_DOC_URL }).catch((err) => {
     console.error("Could not open the long path docs:", err);
+  });
+});
+
+daagbakDocLinkEl.addEventListener("click", (event) => {
+  event.preventDefault();
+  invoke("open_external", { url: DAAGBAK_DOC_URL }).catch((err) => {
+    console.error("Could not open the .daagbak docs:", err);
   });
 });
 
@@ -3194,7 +3204,8 @@ let externalChangePollTimer = null;
 // orphanPathFor), and checkForExternalChange stops polling entirely (no
 // point comparing against a moving target on currentPath once this
 // session has already stopped writing to it).
-// { kind: 'external-change' | 'file-missing' | 'file-locked' | 'save-failed', name } | null
+// { kind: 'external-change' | 'file-missing' | 'file-locked' | 'save-failed'
+//         | 'save-unavailable', name } | null
 //
 // 'file-locked' vs. 'save-failed': both mean "a write to currentPath
 // failed," differing only in whether looksLikeFileLock() recognized the
@@ -3206,6 +3217,14 @@ let externalChangePollTimer = null;
 // out once already with the "os error 5" case) — now any write failure to
 // currentPath sets one of these two and falls back to the orphan file,
 // same protection either way.
+//
+// 'save-unavailable': the write to the *orphan* also failed (or, from the
+// manual resolve dialog, both currentPath and its orphan fallback did) —
+// worse than any of the above, since retrying either location again
+// wouldn't be any better informed than it was a moment ago. Its only
+// resolve-dialog action is Save As (see resolveWithSaveAs) — a brand-new
+// destination the user picks, which then becomes currentPath going
+// forward rather than a one-off export the session keeps ignoring.
 let redirect = null;
 
 // The only place `redirect` should be assigned — keeps the toolbar Save
@@ -3245,15 +3264,22 @@ async function computeDiskState(bytes) {
 function announceRedirect({ reminder = false } = {}) {
   if (!redirect) return;
   const prefix = reminder ? "Reminder: " : "";
-  const message =
-    redirect.kind === "file-missing"
-      ? `${prefix}${redirect.name} could not be found — it may have been moved, renamed, or deleted. Your edits are being saved separately until this is resolved.`
-      : redirect.kind === "file-locked"
-        ? `${prefix}${redirect.name} appears to be open in another program. Your edits are being saved separately until this is resolved.`
-        : redirect.kind === "save-failed"
-          ? `${prefix}${redirect.name} could not be saved to. Your edits are being saved separately until this is resolved.`
-          : `${prefix}${redirect.name} was changed outside Daag. Your edits are being saved separately until this is resolved.`;
-  setStatus(message, "error", { toast: true });
+  const { name, kind } = redirect;
+  let message;
+  if (kind === "file-missing") {
+    message = `${name} could not be found — it may have been moved, renamed, or deleted. Your edits are being saved separately until this is resolved.`;
+  } else if (kind === "file-locked") {
+    message = `${name} appears to be open in another program. Your edits are being saved separately until this is resolved.`;
+  } else if (kind === "save-failed") {
+    message = `${name} could not be saved to. Your edits are being saved separately until this is resolved.`;
+  } else if (kind === "save-unavailable") {
+    // Unlike the other kinds, nothing is being saved anywhere right now —
+    // don't claim otherwise.
+    message = `${name} could not be saved anywhere automatically. Click Save to choose a new location.`;
+  } else {
+    message = `${name} was changed outside Daag. Your edits are being saved separately until this is resolved.`;
+  }
+  setStatus(`${prefix}${message}`, "error", { toast: true });
 }
 
 // The original toast is easy to miss if the window wasn't focused when it
@@ -3263,8 +3289,26 @@ function announceRedirect({ reminder = false } = {}) {
 // poll itself while unfocused: autosave doesn't check window focus either
 // and could clobber an undetected external change at any time, so the
 // poll has to keep running regardless of whether the window is in front).
+//
+// Edge-triggered on an actual blur→focus transition, not on every
+// `focused: true` event — found live that WebView2 can fire more than one
+// (a genuine alt-tab back produced two toasts back to back; clicking
+// anywhere in the drag-region titlebar while *already* focused produced a
+// spurious extra one on its own, no real focus change at all). Tracking
+// "was the window already focused" and only reacting when that flips
+// false→true absorbs both: a duplicate `true` event lands as true→true
+// and is ignored, same as a same-focus titlebar click.
+let wasWindowFocused = true;
+getCurrentWindow()
+  .isFocused()
+  .then((focused) => {
+    wasWindowFocused = focused;
+  })
+  .catch(() => {}); // plain vite dev — keep the optimistic default above
 getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-  if (focused && redirect) announceRedirect({ reminder: true });
+  const cameIntoFocus = focused && !wasWindowFocused;
+  wasWindowFocused = focused;
+  if (cameIntoFocus && redirect) announceRedirect({ reminder: true });
 });
 
 function stopExternalChangePolling() {
@@ -3395,17 +3439,33 @@ async function checkForExternalChange() {
       setRedirect(null); // tentative — restored below if this doesn't actually resolve anything
       markDirty();
       const saved = await saveNow({ force: false });
-      if (saved) {
-        await deleteOrphanIfPresent(path);
-        setStatus(`${filenameFromPath(path)} is back to normal — resuming regular autosave`, "", { toast: true });
-      } else if (!redirect) {
-        // saveNow bailed without ever attempting a write (e.g. a save was
-        // already in flight from somewhere else) rather than genuinely
-        // failing one — its own catch never got a chance to re-set
-        // `redirect`, so restore what was tentatively cleared instead of
-        // leaving canonical unprotected with nothing resolved.
-        setRedirect(previousRedirect);
+      // Check `redirect` itself, not `saved`'s truthiness — saveNow now
+      // falls back to the orphan internally (writeFileAtomicWithFallback)
+      // and still returns the written bytes when it does, so a truthy
+      // `saved` no longer means "landed at currentPath." saveNow already
+      // re-sets `redirect` (and announces) itself whenever a write didn't
+      // land at currentPath, whether that's a fallback or an outright
+      // failure — so `redirect` staying null here is the only reliable
+      // "actually resolved" signal. Got this backwards once already: it
+      // used to check `saved` alone, which called a fallback-to-orphan a
+      // false "back to normal," then deleted the orphan it had just
+      // written this session's latest edits to.
+      if (redirect === null) {
+        if (saved) {
+          await deleteOrphanIfPresent(path);
+          setStatus(`${filenameFromPath(path)} is back to normal — resuming regular autosave`, "", { toast: true });
+        } else {
+          // saveNow bailed without ever attempting a write (e.g. a save
+          // was already in flight from somewhere else) rather than
+          // genuinely failing one — nothing was actually resolved, so
+          // restore what was tentatively cleared instead of leaving
+          // canonical unprotected.
+          setRedirect(previousRedirect);
+        }
       }
+      // else: saveNow itself already re-set `redirect` (fallback or
+      // outright failure) and already announced accordingly — nothing
+      // further to do here.
     } else if (redirect.kind !== "external-change") {
       // Readable again (or a lock-driven failure aside) but with
       // different content than expected — no longer accurately
@@ -3443,6 +3503,78 @@ function looksLikeFileLock(err) {
     message.includes("sharing violation") ||
     message.includes("access is denied")
   );
+}
+
+// Write-then-rename, the pattern used for every write to a real path in
+// this app (see "Conventions" in CLAUDE.md) — never overwrite a target
+// directly, so a crash or power loss mid-write can't corrupt it. Centralized
+// here (rather than each call site repeating write+rename) specifically to
+// close a leak found live: a failed rename leaves the tmp file it already
+// wrote sitting there orphaned forever, since nothing else ever targets
+// `*.autosave.tmp` for cleanup — and a failed rename is not a corner case
+// here, it's *the exact mechanism* that first detects a locked file (a
+// brand-new tmp file writes fine; replacing the locked target is what
+// fails). Best-effort removes the tmp file before the original error
+// propagates, so the caller's own error handling is unaffected.
+async function writeFileAtomic(path, bytes) {
+  const tmpPath = path + ".autosave.tmp";
+  await writeFile(tmpPath, bytes);
+  try {
+    await rename(tmpPath, path);
+  } catch (err) {
+    try {
+      await remove(tmpPath);
+    } catch (cleanupErr) {
+      console.error(`Could not remove leftover ${tmpPath}:`, cleanupErr);
+    }
+    throw err;
+  }
+}
+
+// Used everywhere a failed write to a primary path has a known fallback
+// (currentPath -> the orphan) rather than nowhere to go. The naive version
+// of this — catch the primary failure, discard its tmp file, bake+write a
+// second time to the fallback — has a real gap: between "primary rename
+// failed" and "some later attempt writes fresh bytes to the fallback,"
+// this session's edits exist only in memory, in the exact scenario
+// (something's already gone wrong writing to disk) where that's least
+// welcome. The tmp file the primary attempt already wrote holds
+// perfectly good bytes — this redirects *that same file* straight to the
+// fallback path instead of throwing it away, so the bytes stay
+// continuously on disk somewhere with no such gap, and there's no second
+// write at all. Returns `{ path, primaryError }`: `path` is wherever the
+// bytes actually landed, and `primaryError` — set even on an overall
+// success, whenever that success happened at the fallback — is what the
+// caller should classify/log, since it's the thing that actually failed;
+// only thrown if *both* the primary and the fallback rename fail.
+//
+// `getFallbackPath` is a function, not an already-resolved path: deriving
+// the orphan path is itself a couple of IPC round trips
+// (dirname/basename/join), and the overwhelming majority of calls succeed
+// at the primary on the first try — paying that cost only when a fallback
+// is actually needed keeps an ordinary successful autosave exactly as
+// cheap as it was before this existed.
+async function writeFileAtomicWithFallback(primaryPath, getFallbackPath, bytes) {
+  const tmpPath = primaryPath + ".autosave.tmp";
+  await writeFile(tmpPath, bytes);
+  try {
+    await rename(tmpPath, primaryPath);
+    return { path: primaryPath, primaryError: null };
+  } catch (primaryError) {
+    const fallbackPath = await getFallbackPath();
+    try {
+      await rename(tmpPath, fallbackPath);
+      return { path: fallbackPath, primaryError };
+    } catch (fallbackError) {
+      console.error(`Could not save to the fallback location ${fallbackPath} either:`, fallbackError);
+      try {
+        await remove(tmpPath);
+      } catch (cleanupErr) {
+        console.error(`Could not remove leftover ${tmpPath}:`, cleanupErr);
+      }
+      throw primaryError; // what the caller needs to classify (e.g. looksLikeFileLock)
+    }
+  }
 }
 
 // Shared by saveNow and resolveRedirectAndSave below — both need "the
@@ -3487,19 +3619,43 @@ async function saveNow({ force = false } = {}) {
   try {
     const finalBytes = await bakeCurrentDocumentBytes(app);
 
-    // While redirected, this session's own edits go to a per-process
-    // pending file instead of currentPath — currentPath is never touched,
-    // so the external content just stays exactly where it is (no separate
-    // backup needed) and there's nothing here to fight another session
-    // over. Reconciling a pending file back into currentPath, and
-    // deleting it afterward, is handled separately from this save path.
-    const targetPath = redirect ? await orphanPathFor(currentPath) : currentPath;
-
-    // Write-then-rename instead of overwriting directly, so a crash or
-    // power loss mid-write can't corrupt the target file.
-    const tmpPath = targetPath + ".autosave.tmp";
-    await writeFile(tmpPath, finalBytes);
-    await rename(tmpPath, targetPath);
+    let landedPath;
+    if (redirect) {
+      // Already redirected — the orphan is the only target this call
+      // knows about; no further fallback left within a single attempt if
+      // even that fails (see the catch below).
+      landedPath = await orphanPathFor(currentPath);
+      await writeFileAtomic(landedPath, finalBytes);
+    } else {
+      // Try currentPath, but don't discard the bytes if that specific
+      // write fails — redirect the same already-written tmp file
+      // straight to the orphan instead of throwing it away and leaving
+      // this session's edits in memory only until some later cycle
+      // rewrites them from scratch. `primaryError`, when set even though
+      // the write still succeeded (just not at currentPath), is what
+      // actually failed and drives the redirect classification below —
+      // it not being an outright exception here is what lets a single
+      // failed attempt still end in "safely on disk somewhere."
+      const result = await writeFileAtomicWithFallback(
+        currentPath,
+        () => orphanPathFor(currentPath),
+        finalBytes
+      );
+      landedPath = result.path;
+      if (result.primaryError) {
+        console.error("Could not save to currentPath, saved to a pending copy instead:", result.primaryError);
+        // Any failure writing to currentPath gets a redirect, not just
+        // ones looksLikeFileLock() happens to recognize — that heuristic
+        // is a best-effort string match (already proven wrong once), and
+        // a save failure it doesn't match used to just retry silently
+        // forever with nothing on disk to show for it in the meantime.
+        setRedirect({
+          kind: looksLikeFileLock(result.primaryError) ? "file-locked" : "save-failed",
+          name: filenameFromPath(currentPath),
+        });
+        announceRedirect();
+      }
+    }
 
     if (!redirect) {
       // Record what we just wrote as the expected on-disk state — done
@@ -3507,8 +3663,9 @@ async function saveNow({ force = false } = {}) {
       // save never gets mistaken for an external change. Safe to await:
       // saveInFlight is still true until the `finally` below, so
       // checkForExternalChange skips this whole window regardless of how
-      // long hashing takes. Skipped while redirected: currentPath wasn't
-      // touched, so its baseline hasn't actually changed.
+      // long hashing takes. Skipped while redirected (including just now,
+      // by the branch above): currentPath wasn't actually touched, so its
+      // baseline hasn't changed.
       const diskState = await computeDiskState(finalBytes);
       expectedDiskSize = diskState.size;
       expectedDiskHash = diskState.hash;
@@ -3517,26 +3674,21 @@ async function saveNow({ force = false } = {}) {
     dirty = false;
     setStatus(
       redirect
-        ? `${force ? "Saved" : "Autosaved"} to a pending copy (${filenameFromPath(targetPath)}) — will be reconciled separately`
+        ? `${force ? "Saved" : "Autosaved"} to a pending copy (${filenameFromPath(landedPath)}) — will be reconciled separately`
         : `${force ? "Saved" : "Autosaved"} ${new Date().toLocaleTimeString()}`,
       "",
       { toast: force }
     );
     return finalBytes;
   } catch (err) {
+    // Reached only when *both* currentPath and the orphan failed (a fresh
+    // double failure) or, already redirected, the orphan-only write above
+    // failed on its own — either way there's no further fallback left to
+    // try automatically. See the save-unavailable kind's comment on
+    // `redirect` above.
     console.error("Autosave failed:", err);
-    if (!redirect) {
-      // Any failure writing to currentPath gets a redirect, not just ones
-      // looksLikeFileLock() happens to recognize — that heuristic is a
-      // best-effort string match (already proven wrong once), and a save
-      // failure it doesn't match used to just retry silently forever with
-      // nothing on disk to show for it in the meantime. A failure writing
-      // to the *orphan* (redirect already set) intentionally doesn't fall
-      // in here — see the comment on `redirect` above for that gap.
-      setRedirect({
-        kind: looksLikeFileLock(err) ? "file-locked" : "save-failed",
-        name: filenameFromPath(currentPath),
-      });
+    if (redirect?.kind !== "save-unavailable") {
+      setRedirect({ kind: "save-unavailable", name: filenameFromPath(currentPath) });
       announceRedirect();
     } else {
       setStatus("Autosave failed", "error", { toast: true });
@@ -3594,6 +3746,12 @@ async function deleteOrphanIfPresent(path) {
 function configureResolveRedirectDialog() {
   const name = redirect.name;
   resolveRedirectDialogMergeButtonEl.classList.toggle("hidden", redirect.kind !== "external-change");
+  // Save As is offered alongside every kind's own primary action (a lock
+  // is per-path, not per-folder, so a new filename can plausibly save
+  // immediately; a "missing" file's whole folder might be gone, not just
+  // the file) — except save-unavailable, where it's promoted to the only
+  // option since neither currentPath nor the orphan next to it worked.
+  resolveRedirectDialogConfirmButtonEl.classList.toggle("hidden", redirect.kind === "save-unavailable");
   if (redirect.kind === "file-missing") {
     resolveRedirectDialogTitleEl.textContent = "File not found";
     resolveRedirectDialogMessageEl.textContent =
@@ -3612,6 +3770,11 @@ function configureResolveRedirectDialog() {
       `${name} could not be saved to. This will try saving there again — if it still fails, your edits ` +
       `will keep saving to a pending copy instead.`;
     resolveRedirectDialogConfirmButtonEl.textContent = "Retry Save";
+  } else if (redirect.kind === "save-unavailable") {
+    resolveRedirectDialogTitleEl.textContent = "Could not save anywhere";
+    resolveRedirectDialogMessageEl.textContent =
+      `${name} could not be saved, and neither could a pending copy alongside it — the whole location may ` +
+      `be unavailable (a removed drive, an unmounted synced folder). Choose a new place to save your edits.`;
   } else {
     resolveRedirectDialogTitleEl.textContent = "File changed outside Daag";
     resolveRedirectDialogMessageEl.textContent =
@@ -3621,8 +3784,8 @@ function configureResolveRedirectDialog() {
   }
 }
 
-// "confirm" | null (cancelled) — Escape/backdrop/Close/Cancel all resolve
-// null via settleResolveRedirect, same settle-slot pattern as
+// "confirm" | "save-as" | null (cancelled) — Escape/backdrop/Close/Cancel
+// all resolve null via settleResolveRedirect, same settle-slot pattern as
 // resolveContinueOrStartOverPrompt above. Merge deliberately never
 // settles this promise or closes the dialog — see its own listener below.
 let settleResolveRedirectPrompt = null;
@@ -3640,6 +3803,7 @@ function settleResolveRedirect(result) {
   settle?.(result);
 }
 resolveRedirectDialogConfirmButtonEl.addEventListener("click", () => settleResolveRedirect("confirm"));
+resolveRedirectDialogSaveAsButtonEl.addEventListener("click", () => settleResolveRedirect("save-as"));
 resolveRedirectDialogCancelButtonEl.addEventListener("click", () => settleResolveRedirect(null));
 resolveRedirectDialogCloseButtonEl.addEventListener("click", () => settleResolveRedirect(null));
 resolveRedirectDialogEl.addEventListener("click", (event) => {
@@ -3670,19 +3834,20 @@ async function resolveRedirectAndSave(app) {
     const finalBytes = await bakeCurrentDocumentBytes(app);
 
     if (kind === "external-change") {
-      // About to overwrite content this app never wrote — back it up
+      // About to overwrite content this app never wrote — move it aside
       // first. Same principle the very first version of this whole
       // feature had (never overwrite without preserving the other side),
-      // just triggered explicitly here instead of automatically. If the
-      // backup itself fails, don't proceed — overwriting without it would
-      // be the one truly unrecoverable mistake this entire design has
-      // been built to avoid.
+      // just triggered explicitly here instead of automatically. A
+      // rename, not a read-then-write: the external content isn't being
+      // modified, only relocated, so there's no reason to read a
+      // potentially large file fully into memory just to write those
+      // same bytes straight back out unchanged a moment later. If the
+      // rename itself fails, don't proceed — overwriting without a
+      // backup would be the one truly unrecoverable mistake this entire
+      // design has been built to avoid.
       try {
-        const existing = await readIfExists(path);
         const backupPath = await externalBackupPathFor(path);
-        const backupTmp = backupPath + ".autosave.tmp";
-        await writeFile(backupTmp, existing);
-        await rename(backupTmp, backupPath);
+        await rename(path, backupPath);
       } catch (err) {
         console.error("Could not back up the externally changed file before overwriting it:", err);
         setStatus("Could not back up the other version — save cancelled to avoid losing it", "error", {
@@ -3692,28 +3857,43 @@ async function resolveRedirectAndSave(app) {
       }
     }
 
-    const tmpPath = path + ".autosave.tmp";
-    try {
-      await writeFile(tmpPath, finalBytes);
-      await rename(tmpPath, path);
-    } catch (err) {
-      if (kind !== "external-change") {
-        // Recreate (file-missing) or retry (file-locked) failed — most
-        // likely still locked, or whatever stopped it before is still
-        // there. Fall back to the orphan so this click's edits aren't
-        // lost, same as an ordinary autosave would have done.
-        console.error(`Could not save to ${path}, saving to the pending file instead:`, err);
-        const orphanPath = await orphanPathFor(path);
-        const orphanTmp = orphanPath + ".autosave.tmp";
-        await writeFile(orphanTmp, finalBytes);
-        await rename(orphanTmp, orphanPath);
+    if (kind === "external-change") {
+      // No fallback here — external-change's own backup already
+      // succeeded moments ago, so a write failure at this point is
+      // unexpected; let the outer catch below handle it via
+      // save-unavailable rather than silently falling back to the
+      // orphan for a case this design doesn't otherwise expect.
+      await writeFileAtomic(path, finalBytes);
+    } else {
+      // Recreate (file-missing) or retry (file-locked/save-failed) might
+      // fail again — don't discard the bytes if so; redirect the same
+      // already-written tmp file straight to the orphan instead of
+      // writing fresh a second time, same reasoning as saveNow's own
+      // fallback (see writeFileAtomicWithFallback's comment above).
+      let result;
+      try {
+        result = await writeFileAtomicWithFallback(path, () => orphanPathFor(path), finalBytes);
+      } catch (err) {
+        // Neither location works — retrying either one again is
+        // pointless, so there's nothing left for this dialog's own
+        // primary action to do. See configureResolveRedirectDialog's
+        // save-unavailable branch: only Save As remains from here.
+        console.error(`Could not save to a pending copy either:`, err);
+        setRedirect({ kind: "save-unavailable", name: filenameFromPath(path) });
+        setStatus(`${filenameFromPath(path)} could not be saved anywhere automatically`, "error", {
+          toast: true,
+        });
+        return;
+      }
+      if (result.primaryError) {
+        console.error(`Could not save to ${path}, saved to the pending file instead:`, result.primaryError);
         dirty = false; // still saved *somewhere* — same convention saveNow uses for an ordinary redirected write
         setStatus(`${filenameFromPath(path)} is still unavailable — saved to a pending copy instead`, "error", {
           toast: true,
         });
         return;
       }
-      throw err; // external-change's own backup already succeeded; a write failure here is unexpected
+      // else: landed at `path` itself — fall through to the shared success path below.
     }
 
     // Success: currentPath now holds this session's current state, and
@@ -3727,8 +3907,88 @@ async function resolveRedirectAndSave(app) {
     dirty = false;
     setStatus(`Saved ${new Date().toLocaleTimeString()}`, "", { toast: true });
   } catch (err) {
+    // Reached by external-change's own overwrite failing unexpectedly
+    // (its backup already succeeded, so this is a surprise, not the
+    // normal retry-then-orphan path above) or anything else unforeseen in
+    // this flow. Either way, retrying from the same dialog wouldn't be
+    // any more informed than it was a moment ago — hand off to
+    // save-unavailable's Save-As-only recovery rather than leaving the
+    // user stuck re-clicking the same failing action.
     console.error("Could not resolve the pending save:", err);
+    if (redirect && redirect.kind !== "save-unavailable") {
+      setRedirect({ kind: "save-unavailable", name: filenameFromPath(path) });
+    }
     setStatus("Could not resolve the pending save", "error", { toast: true });
+  } finally {
+    saveInFlight = false;
+  }
+}
+
+// Escapes the whole currentPath/orphan relationship rather than trying to
+// repair it — the user picks a brand-new destination via the native
+// dialog, and that destination *becomes* the document going forward,
+// same as opening a file, not a one-off export. Available from the
+// resolve dialog for every redirect kind (a lock is per-path, not
+// per-folder, so a new filename can plausibly save even without leaving
+// the same directory; a "missing" file's whole folder might be gone too),
+// and it's the only option left once save-unavailable means neither
+// currentPath nor the orphan next to it worked.
+async function resolveWithSaveAs(app) {
+  const oldPath = currentPath;
+  if (!oldPath) return;
+
+  const newPath = await save({
+    title: "Save As",
+    defaultPath: filenameFromPath(oldPath),
+    filters: [{ name: "PDF", extensions: ["pdf"] }],
+  });
+  if (!newPath) return; // cancelled — nothing changed, still redirected as before
+
+  if (saveInFlight) {
+    // Another save (autosave to the orphan, most likely) was already
+    // running when the picker resolved — vanishingly rare given the
+    // picker itself takes seconds, but don't silently drop this click's
+    // bytes into a race. Nothing was touched; a second Save click retries.
+    setStatus("Still finishing another save — click Save again to retry", "", { toast: true });
+    return;
+  }
+
+  saveInFlight = true;
+  setStatus("Saving…", "saving");
+  try {
+    const finalBytes = await bakeCurrentDocumentBytes(app);
+    await writeFileAtomic(newPath, finalBytes);
+
+    // From here on this is the open document, exactly as if it had been
+    // opened via the picker in the first place — not a side-channel
+    // export the session keeps ignoring afterward.
+    const diskState = await computeDiskState(finalBytes);
+    currentPath = newPath;
+    expectedDiskSize = diskState.size;
+    expectedDiskHash = diskState.hash;
+    setRedirect(null);
+    dirty = false;
+
+    addToRecentFiles(newPath);
+    renderRecentFiles();
+    updateWindowTitle(app, newPath);
+    refreshFolderNavigation(newPath).catch((err) => {
+      // The old folder's Prev/Next listing no longer applies once the
+      // document has moved — same fire-and-forget handling
+      // loadPdfIntoViewer already uses for a fresh Open.
+      console.error("Could not refresh folder navigation after Save As:", err);
+      titlebarPrevBtn.disabled = true;
+      titlebarNextBtn.disabled = true;
+    });
+    // Best-effort, same as every other resolve success path — if the old
+    // location is the reason we're here at all, there may be nothing left
+    // to clean up, and that's fine.
+    await deleteOrphanIfPresent(oldPath);
+
+    setStatus(`Saved to ${filenameFromPath(newPath)} — now autosaving there`, "", { toast: true });
+  } catch (err) {
+    console.error(`Could not save to ${newPath}:`, err);
+    setStatus("Could not save to the chosen location", "error", { toast: true });
   } finally {
     saveInFlight = false;
   }
@@ -3742,8 +4002,11 @@ async function onSaveActivated() {
   const app = getViewerApp();
   if (!app || !app.pdfDocument) return;
   const choice = await promptResolveRedirect();
-  if (choice !== "confirm") return;
-  await resolveRedirectAndSave(app);
+  if (choice === "confirm") {
+    await resolveRedirectAndSave(app);
+  } else if (choice === "save-as") {
+    await resolveWithSaveAs(app);
+  }
 }
 
 // ---- "Undo All": reverting to the file's state at session start --------
