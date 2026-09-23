@@ -39,6 +39,28 @@
       <section class="wrap">
         <div class="release">
           <h2>
+            v1.7.0
+            <span class="date">2026-09-23</span>
+            <a class="gh" href="https://github.com/asifm91/daag/releases/tag/v1.7.0">see release →</a>
+          </h2>
+          <h3>Added</h3>
+          <ul>
+            <li><b>Protection when the open file changes underneath you</b> — if the PDF is changed by another device or program (e.g. a synced copy edited elsewhere), moved, renamed or deleted, or can't be saved because another program has it open, Daag stops writing to it and saves your edits to a separate <code>.daagbak</code> file next to it instead, so neither version is lost. A notice explains what happened (repeated when you come back to the window), and a dot on the Save button shows that clicking it will offer a fix: restore a missing file, retry a locked one, or overwrite a changed one (after keeping the other version as a backup).</li>
+            <li><b>Save As… when the file can't be saved in place</b> — offered alongside each of the fixes above, and as the only option when even the <code>.daagbak</code> copy can't be written (e.g. a removed drive or unavailable network folder). The document then continues from the new location.</li>
+            <li><b><code>.daagbak</code> files explained</b> — a new row in Settings → General and a section in the online guide describe what these files are and when they're safe to delete.</li>
+          </ul>
+          <h3>Changed</h3>
+          <ul>
+            <li><b>Annotations get a stable unique ID when saved</b> — groundwork for merging annotations from different copies of the same file in a future release. No visible change.</li>
+          </ul>
+          <h3>Fixed</h3>
+          <ul>
+            <li><b>Stray <code>.autosave.tmp</code> files</b> — a save that failed partway through could leave a <code><file>.pdf.autosave.tmp</code> next to the PDF indefinitely. It's now cleaned up.</li>
+          </ul>
+        </div>
+
+        <div class="release">
+          <h2>
             v1.6.0
             <span class="date">2026-09-17</span>
             <a class="gh" href="https://github.com/asifm91/daag/releases/tag/v1.6.0">see release →</a>

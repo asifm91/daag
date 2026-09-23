@@ -9,6 +9,8 @@ stays in this file but is left off the website.
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-09-23
+
 ### Added
 
 - **Protection when the open file changes underneath you** — if the PDF is
@@ -168,7 +170,8 @@ stays in this file but is left off the website.
 - The window title tracks the PDF’s own metadata title and shows the full
   file path on hover.
 
-[Unreleased]: https://github.com/asifm91/daag/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/asifm91/daag/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/asifm91/daag/releases/tag/v1.7.0
 [1.6.0]: https://github.com/asifm91/daag/releases/tag/v1.6.0
 [1.5.1]: https://github.com/asifm91/daag/releases/tag/v1.5.1
 [1.5.0]: https://github.com/asifm91/daag/releases/tag/v1.5.0
